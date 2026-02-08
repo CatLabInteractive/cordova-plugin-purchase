@@ -26,6 +26,7 @@ SOFTWARE.
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
     id="cordova-plugin-purchase"
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     version="13.13.0">
 
     <name>Purchase</name>
@@ -110,6 +111,15 @@ SOFTWARE.
       </js-module>
       <config-file target="AndroidManifest.xml" parent="/*">
         <uses-permission android:name="com.android.vending.BILLING" />
+      </config-file>
+
+      <!-- Allow minSdkVersion < 23 for Amazon Fire TV devices.
+        The Google Play Billing Library requires minSdkVersion 23, but the Amazon
+        AppStore SDK does not. Since the Google Play adapter only runs when explicitly
+        initialized with Platform.GOOGLE_PLAY (and Google Play devices have API 23+),
+        this override is safe. -->
+      <config-file target="AndroidManifest.xml" parent="/manifest">
+        <uses-sdk tools:overrideLibrary="com.android.billingclient" />
       </config-file>
 
       <!-- Cordova >= 3.0.0 -->

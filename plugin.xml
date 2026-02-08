@@ -118,7 +118,7 @@ SOFTWARE.
         initialized with Platform.GOOGLE_PLAY (and Google Play devices have API 23+),
         this override is safe. -->
       <config-file target="AndroidManifest.xml" parent="/manifest">
-        <uses-sdk xmlns:tools="http://schemas.android.com/tools" tools:overrideLibrary="com.android.billingclient" />
+        <uses-sdk xmlns:tools="http://schemas.android.com/tools" tools:overrideLibrary="com.android.billingclient,com.google.android.gms.common" />
       </config-file>
 
       <!-- Cordova >= 3.0.0 -->

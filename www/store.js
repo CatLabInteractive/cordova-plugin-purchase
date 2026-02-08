@@ -2939,16 +2939,8 @@ var CdvPurchase;
                     if (!receiptId)
                         return resolve(amazonError(CdvPurchase.ErrorCode.FINISH, 'Cannot finish transaction, no receiptId found.', null));
                     const onFailure = (message, code) => resolve(amazonError(code || CdvPurchase.ErrorCode.UNKNOWN, message, null));
-                    const firstProduct = transaction.products[0];
-                    const product = firstProduct ? this._products.find(p => p.id === firstProduct.id) : undefined;
-                    // For consumables, notify fulfillment
-                    if (!product || product.type === CdvPurchase.ProductType.CONSUMABLE || product.type === CdvPurchase.ProductType.NON_RENEWING_SUBSCRIPTION) {
-                        this.bridge.notifyFulfillment(receiptId, onSuccess, onFailure);
-                    }
-                    else {
-                        // For non-consumables and subscriptions, also notify fulfillment
-                        this.bridge.notifyFulfillment(receiptId, onSuccess, onFailure);
-                    }
+                    // Amazon IAP uses notifyFulfillment for all product types
+                    this.bridge.notifyFulfillment(receiptId, onSuccess, onFailure);
                 });
             }
             /** Called by the bridge when a purchase has been fulfilled */

@@ -21,6 +21,7 @@ namespace CdvPurchase
             platform: Platform.IAPTIC_JS;
             options: IapticJS.AdapterOptions;
         }
+        export interface AmazonAppStore { platform: Platform.AMAZON_APPSTORE; }
     }
 
     /**
@@ -35,6 +36,7 @@ namespace CdvPurchase
         | PlatformOptions.Test
         | PlatformOptions.WindowsStore
         | PlatformOptions.IapticJS
+        | PlatformOptions.AmazonAppStore
         ;
 
     /** @internal */
@@ -151,6 +153,8 @@ namespace CdvPurchase
                                 log.error('Options missing for IapticJS initialization. Use {platform: Platform.IAPTIC_JS, options: {...}} in your call to store.initialize');
                             }
                             return this.list.push(new IapticJS.Adapter(context, po.options));
+                        case Platform.AMAZON_APPSTORE:
+                            return this.list.push(new AmazonAppStore.Adapter(context));
                         default:
                             // Check for dynamically registered adapter
                             const dynamicAdapter = Adapters.createAdapter(po.platform, context, (po as { options?: object }).options || {});

@@ -110,7 +110,8 @@ namespace CdvPurchase {
                 | ApiValidatorBodyTransactionGoogle
                 | ApiValidatorBodyTransactionWindows
                 | ApiValidatorBodyTransactionBraintree
-                | ApiValidatorBodyTransactionIaptic;
+                | ApiValidatorBodyTransactionIaptic
+                | ApiValidatorBodyTransactionAmazon;
 
             export interface ApiValidatorBodyTransactionIaptic {
                 type: 'iaptic';
@@ -226,6 +227,22 @@ namespace CdvPurchase {
 
                 /** Data collected on the device */
                 deviceData: any;
+            }
+
+            /** Transaction type from Amazon AppStore */
+            export interface ApiValidatorBodyTransactionAmazon {
+
+                /** Value `"amazon-appstore"` */
+                type: Platform.AMAZON_APPSTORE;
+
+                /** Identifier of the transaction to evaluate. @required */
+                id?: string;
+
+                /** Amazon receipt ID. @required */
+                receiptId?: string;
+
+                /** Amazon user ID. @optional */
+                userId?: string;
             }
 
             /* Transaction type from Stripe

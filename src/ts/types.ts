@@ -261,6 +261,9 @@ namespace CdvPurchase {
 
         /** Iaptic.js */
         IAPTIC_JS = 'iaptic-js',
+
+        /** Amazon AppStore */
+        AMAZON_APPSTORE = 'amazon-appstore',
     }
 
     /**

@@ -130,20 +130,27 @@ public final class AmazonPurchasePlugin
 
     /**
      * Initialize the Amazon IAP SDK.
+     *
+     * PurchasingService.registerListener() must be called on the main UI thread.
      */
     private void initAmazonIAP() {
         Log.d(mTag, "initAmazonIAP()");
-        try {
-            PurchasingService.registerListener(cordova.getActivity().getApplicationContext(), this);
-            PurchasingService.getUserData();
-            mInitialized = true;
-        } catch (Exception e) {
-            Log.e(mTag, "Failed to initialize Amazon IAP: " + e.getMessage());
-            if (mCallbackContext != null) {
-                mCallbackContext.error("Failed to initialize Amazon IAP: " + e.getMessage());
-                mCallbackContext = null;
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    PurchasingService.registerListener(cordova.getActivity().getApplicationContext(), AmazonPurchasePlugin.this);
+                    PurchasingService.getUserData();
+                    mInitialized = true;
+                } catch (Exception e) {
+                    Log.e(mTag, "Failed to initialize Amazon IAP: " + e.getMessage());
+                    if (mCallbackContext != null) {
+                        mCallbackContext.error("Failed to initialize Amazon IAP: " + e.getMessage());
+                        mCallbackContext = null;
+                    }
+                }
             }
-        }
+        });
     }
 
     // ---- PurchasingListener implementation ----

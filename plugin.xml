@@ -149,6 +149,11 @@ SOFTWARE.
             />
         </feature>
       </config-file>
+
+      <!-- Copy AppstoreAuthenticationKey.pem from project root to Android assets
+        if the file exists. Required by the Amazon Appstore SDK for DRM verification. -->
+      <hook type="before_build" src="scripts/copy-amazon-auth-key.js" />
+      <hook type="before_run" src="scripts/copy-amazon-auth-key.js" />
     </platform>
 
     <platform name="browser">

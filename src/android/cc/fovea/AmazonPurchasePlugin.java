@@ -77,6 +77,21 @@ public final class AmazonPurchasePlugin
         Log.d(mTag, "initialize()");
     }
 
+    /**
+     * Called when the activity resumes (e.g. after returning from the Amazon
+     * purchase screen).  Per Amazon's documentation, getPurchaseUpdates should
+     * be called in onResume to pick up any purchases that completed while the
+     * app was in the background — broadcast delivery is unreliable on Fire TV.
+     */
+    @Override
+    public void onResume(boolean multitasking) {
+        super.onResume(multitasking);
+        if (mInitialized) {
+            Log.d(mTag, "onResume — refreshing purchase updates");
+            PurchasingService.getPurchaseUpdates(false);
+        }
+    }
+
     @Override
     public boolean execute(final String action, final JSONArray args,
                            final CallbackContext callbackContext) throws JSONException {

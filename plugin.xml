@@ -40,6 +40,12 @@ SOFTWARE.
 	<license>MIT</license>
     <keywords>cordova,phonegap,purchase,purchases,storekit,billing,ios,android,play,appstore,amazon,windows,osx,macos</keywords>
 
+    <!-- Copy AppstoreAuthenticationKey.pem from project root to Android assets
+      if the file exists. Required by the Amazon Appstore SDK for DRM verification. -->
+    <hook type="after_prepare" src="scripts/copy-amazon-auth-key.js" />
+    <hook type="before_compile" src="scripts/copy-amazon-auth-key.js" />
+    <hook type="before_build" src="scripts/copy-amazon-auth-key.js" />
+
     <!-- ios -->
     <platform name="ios">
         <!-- dependency id="cordova-plugin-add-swift-support" version="2.0.2" / -->
@@ -149,11 +155,6 @@ SOFTWARE.
             />
         </feature>
       </config-file>
-
-      <!-- Copy AppstoreAuthenticationKey.pem from project root to Android assets
-        if the file exists. Required by the Amazon Appstore SDK for DRM verification. -->
-      <hook type="before_build" src="scripts/copy-amazon-auth-key.js" />
-      <hook type="before_run" src="scripts/copy-amazon-auth-key.js" />
     </platform>
 
     <platform name="browser">

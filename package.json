@@ -62,6 +62,7 @@
     "/plugin.xml",
     "/README.md",
     "/RELEASE_NOTES.md",
+    "/scripts",
     "/src/android/cc/fovea",
     "/src/ios",
     "/src/ts",

@@ -365,23 +365,6 @@ var CdvPurchase;
 (function (CdvPurchase) {
     /** Product definition from a store */
     class Product {
-        /** @internal */
-        constructor(p, decorator) {
-            /** @internal */
-            this.className = 'Product';
-            /** Product title from the store. */
-            this.title = '';
-            /** Product full description from the store. */
-            this.description = '';
-            this.platform = p.platform;
-            this.type = p.type;
-            this.id = p.id;
-            this.group = p.group;
-            this.offers = [];
-            Object.defineProperty(this, 'pricing', { enumerable: false, get: () => { var _a; return (_a = this.offers[0]) === null || _a === void 0 ? void 0 : _a.pricingPhases[0]; } });
-            Object.defineProperty(this, 'canPurchase', { enumerable: false, get: () => decorator.canPurchase(this) });
-            Object.defineProperty(this, 'owned', { enumerable: false, get: () => decorator.owned(this) });
-        }
         /**
          * Shortcut to offers[0].pricingPhases[0]
          *
@@ -412,6 +395,23 @@ var CdvPurchase;
             // Pseudo implementation to make typescript happy.
             // see Object.defineProperty in the constructor for the actual implementation.
             return false;
+        }
+        /** @internal */
+        constructor(p, decorator) {
+            /** @internal */
+            this.className = 'Product';
+            /** Product title from the store. */
+            this.title = '';
+            /** Product full description from the store. */
+            this.description = '';
+            this.platform = p.platform;
+            this.type = p.type;
+            this.id = p.id;
+            this.group = p.group;
+            this.offers = [];
+            Object.defineProperty(this, 'pricing', { enumerable: false, get: () => { var _a; return (_a = this.offers[0]) === null || _a === void 0 ? void 0 : _a.pricingPhases[0]; } });
+            Object.defineProperty(this, 'canPurchase', { enumerable: false, get: () => decorator.canPurchase(this) });
+            Object.defineProperty(this, 'owned', { enumerable: false, get: () => decorator.owned(this) });
         }
         /**
          * Find and return an offer for this product from its id
@@ -1234,14 +1234,14 @@ var CdvPurchase;
          * monitor.stop();
          */
         class TransactionStateMonitors {
+            findMonitors(transaction) {
+                return this.monitors.filter(monitor => monitor.transaction.platform === transaction.platform
+                    && monitor.transaction.transactionId === transaction.transactionId);
+            }
             constructor(when) {
                 this.monitors = [];
                 this.isListening = false;
                 this.when = when;
-            }
-            findMonitors(transaction) {
-                return this.monitors.filter(monitor => monitor.transaction.platform === transaction.platform
-                    && monitor.transaction.transactionId === transaction.transactionId);
             }
             startListening() {
                 if (this.isListening) {
@@ -1489,6 +1489,24 @@ var CdvPurchase;
      * Entry class of the plugin.
      */
     class Store {
+        /**
+         * Retrieve a platform adapter.
+         *
+         * The platform adapter has to have been initialized before.
+         *
+         * @see {@link initialize}
+         */
+        getAdapter(platform) {
+            return this.adapters.find(platform);
+        }
+        /**
+         * Get the application username as a string by either calling or returning {@link Store.applicationUsername}
+        */
+        getApplicationUsername() {
+            if (this.applicationUsername instanceof Function)
+                return this.applicationUsername();
+            return this.applicationUsername;
+        }
         constructor() {
             /**
              * Payment platform adapters.
@@ -1605,24 +1623,6 @@ var CdvPurchase;
                 },
             }, this.log);
             this.expiryMonitor.launch();
-        }
-        /**
-         * Retrieve a platform adapter.
-         *
-         * The platform adapter has to have been initialized before.
-         *
-         * @see {@link initialize}
-         */
-        getAdapter(platform) {
-            return this.adapters.find(platform);
-        }
-        /**
-         * Get the application username as a string by either calling or returning {@link Store.applicationUsername}
-        */
-        getApplicationUsername() {
-            if (this.applicationUsername instanceof Function)
-                return this.applicationUsername();
-            return this.applicationUsername;
         }
         /**
          * Register a product.
@@ -2315,20 +2315,6 @@ var CdvPurchase;
      * One of the available offers to purchase a given product
      */
     class Offer {
-        /** @internal */
-        constructor(options, decorator) {
-            /** className, used to make sure we're passing an actual instance of the "Offer" class. */
-            this.className = 'Offer';
-            this.id = options.id;
-            this.pricingPhases = options.pricingPhases;
-            // Object.defineProperty(this, 'product', { enumerable: false, get: () => options.product });
-            Object.defineProperty(this, 'productId', { enumerable: true, get: () => options.product.id });
-            Object.defineProperty(this, 'productType', { enumerable: true, get: () => options.product.type });
-            Object.defineProperty(this, 'productGroup', { enumerable: true, get: () => options.product.group });
-            Object.defineProperty(this, 'platform', { enumerable: true, get: () => options.product.platform });
-            Object.defineProperty(this, 'order', { enumerable: false, get: () => (additionalData) => decorator.order(this, additionalData) });
-            Object.defineProperty(this, 'canPurchase', { enumerable: false, get: () => decorator.canPurchase(this) });
-        }
         /** Identifier of the product related to this offer */
         get productId() { return ''; }
         /** Type of the product related to this offer */
@@ -2357,6 +2343,20 @@ var CdvPurchase;
             // Pseudo implementation to make typescript happy.
             // see Object.defineProperty in the constructor for the actual implementation.
             return false;
+        }
+        /** @internal */
+        constructor(options, decorator) {
+            /** className, used to make sure we're passing an actual instance of the "Offer" class. */
+            this.className = 'Offer';
+            this.id = options.id;
+            this.pricingPhases = options.pricingPhases;
+            // Object.defineProperty(this, 'product', { enumerable: false, get: () => options.product });
+            Object.defineProperty(this, 'productId', { enumerable: true, get: () => options.product.id });
+            Object.defineProperty(this, 'productType', { enumerable: true, get: () => options.product.type });
+            Object.defineProperty(this, 'productGroup', { enumerable: true, get: () => options.product.group });
+            Object.defineProperty(this, 'platform', { enumerable: true, get: () => options.product.platform });
+            Object.defineProperty(this, 'order', { enumerable: false, get: () => (additionalData) => decorator.order(this, additionalData) });
+            Object.defineProperty(this, 'canPurchase', { enumerable: false, get: () => decorator.canPurchase(this) });
         }
     }
     CdvPurchase.Offer = Offer;
@@ -2444,6 +2444,14 @@ var CdvPurchase;
 var CdvPurchase;
 (function (CdvPurchase) {
     class Receipt {
+        /** Verify a receipt */
+        verify() {
+            return __awaiter(this, void 0, void 0, function* () { });
+        }
+        /** Finish all transactions in a receipt */
+        finish() {
+            return __awaiter(this, void 0, void 0, function* () { });
+        }
         /** @internal */
         constructor(platform, decorator) {
             /** @internal */
@@ -2453,14 +2461,6 @@ var CdvPurchase;
             this.platform = platform;
             Object.defineProperty(this, 'verify', { 'enumerable': false, get() { return () => decorator.verify(this); } });
             Object.defineProperty(this, 'finish', { 'enumerable': false, get() { return () => decorator.finish(this); } });
-        }
-        /** Verify a receipt */
-        verify() {
-            return __awaiter(this, void 0, void 0, function* () { });
-        }
-        /** Finish all transactions in a receipt */
-        finish() {
-            return __awaiter(this, void 0, void 0, function* () { });
         }
         /** Return true if the receipt contains the given transaction */
         hasTransaction(value) {
@@ -2482,21 +2482,6 @@ var CdvPurchase;
      * @see {@link store.localTransactions}
      */
     class Transaction {
-        /** @internal */
-        constructor(platform, parentReceipt, decorator) {
-            /** @internal */
-            this.className = 'Transaction';
-            /** Transaction identifier. */
-            this.transactionId = '';
-            /** State this transaction is in */
-            this.state = CdvPurchase.TransactionState.UNKNOWN_STATE;
-            /** Purchased products */
-            this.products = [];
-            this.platform = platform;
-            Object.defineProperty(this, 'finish', { 'enumerable': false, get() { return () => decorator.finish(this); } });
-            Object.defineProperty(this, 'verify', { 'enumerable': false, get() { return () => decorator.verify(this); } });
-            Object.defineProperty(this, 'parentReceipt', { 'enumerable': false, get() { return parentReceipt; } });
-        }
         /**
          * Finish a transaction.
          *
@@ -2530,6 +2515,21 @@ var CdvPurchase;
          * Return the receipt this transaction is part of.
          */
         get parentReceipt() { return {}; } // actual implementation in the constructor
+        /** @internal */
+        constructor(platform, parentReceipt, decorator) {
+            /** @internal */
+            this.className = 'Transaction';
+            /** Transaction identifier. */
+            this.transactionId = '';
+            /** State this transaction is in */
+            this.state = CdvPurchase.TransactionState.UNKNOWN_STATE;
+            /** Purchased products */
+            this.products = [];
+            this.platform = platform;
+            Object.defineProperty(this, 'finish', { 'enumerable': false, get() { return () => decorator.finish(this); } });
+            Object.defineProperty(this, 'verify', { 'enumerable': false, get() { return () => decorator.verify(this); } });
+            Object.defineProperty(this, 'parentReceipt', { 'enumerable': false, get() { return parentReceipt; } });
+        }
     }
     CdvPurchase.Transaction = Transaction;
 })(CdvPurchase || (CdvPurchase = {}));
@@ -2806,6 +2806,9 @@ var CdvPurchase;
         }
         AmazonAppStore.Receipt = Receipt;
         class Adapter {
+            /** List of products managed by the adapter */
+            get products() { return this._products; }
+            get receipts() { return this._receipts; }
             constructor(context) {
                 /** Adapter identifier */
                 this.id = CdvPurchase.Platform.AMAZON_APPSTORE;
@@ -2828,9 +2831,6 @@ var CdvPurchase;
                 this.log = context.log.child('AmazonAppStore');
                 Adapter._instance = this;
             }
-            /** List of products managed by the adapter */
-            get products() { return this._products; }
-            get receipts() { return this._receipts; }
             /** Returns true on Android, the platform supported by this adapter */
             get isSupported() {
                 return CdvPurchase.Utils.platformId() === 'android';
@@ -2851,6 +2851,20 @@ var CdvPurchase;
                         };
                         const iabReady = () => {
                             this.log.debug("Ready");
+                            this.initialized = true;
+                            this.ready = true;
+                            // Listen for app resume events and refresh purchases
+                            // from the JS side.  The Java onResume handler also calls
+                            // getPurchaseUpdates, but its PluginResult may not be
+                            // delivered reliably when the WebView was paused during
+                            // the Amazon purchase overlay.  Calling from JS guarantees
+                            // the bridge callback is active.
+                            document.addEventListener('resume', () => {
+                                if (this.initialized) {
+                                    this.log.debug("App resumed — refreshing purchases from JS");
+                                    this.getPurchaseUpdates();
+                                }
+                            }, false);
                             resolve(undefined);
                         };
                         const iabError = (err) => {
@@ -3273,6 +3287,23 @@ var CdvPurchase;
          * Adapter for Apple AppStore using StoreKit version 1
          */
         class Adapter {
+            get products() { return this._products; }
+            /** Find a given product from ID */
+            getProduct(id) { return this._products.find(p => p.id === id); }
+            get receipts() {
+                if (!this.isSupported)
+                    return [];
+                return (this._receipt ? [this._receipt] : [])
+                    .concat(this.pseudoReceipt ? this.pseudoReceipt : []);
+            }
+            addValidProducts(registerProducts, validProducts) {
+                validProducts.forEach(vp => {
+                    const rp = registerProducts.find(p => p.id === vp.id);
+                    if (!rp)
+                        return;
+                    this.validProducts[vp.id] = Object.assign(Object.assign({}, vp), rp);
+                });
+            }
             constructor(context, options) {
                 var _a, _b;
                 this.id = CdvPurchase.Platform.APPLE_APPSTORE;
@@ -3304,23 +3335,6 @@ var CdvPurchase;
                 this.receiptsUpdated = CdvPurchase.Utils.createDebouncer(() => {
                     this._receiptsUpdated();
                 }, 300);
-            }
-            get products() { return this._products; }
-            /** Find a given product from ID */
-            getProduct(id) { return this._products.find(p => p.id === id); }
-            get receipts() {
-                if (!this.isSupported)
-                    return [];
-                return (this._receipt ? [this._receipt] : [])
-                    .concat(this.pseudoReceipt ? this.pseudoReceipt : []);
-            }
-            addValidProducts(registerProducts, validProducts) {
-                validProducts.forEach(vp => {
-                    const rp = registerProducts.find(p => p.id === vp.id);
-                    if (!rp)
-                        return;
-                    this.validProducts[vp.id] = Object.assign(Object.assign({}, vp), rp);
-                });
             }
             /** Returns true on iOS, the only platform supported by this adapter */
             get isSupported() {
@@ -4580,6 +4594,7 @@ var CdvPurchase;
         }
         Braintree.BraintreeReceipt = BraintreeReceipt;
         class Adapter {
+            get receipts() { return this._receipts; }
             constructor(context, options) {
                 this.id = CdvPurchase.Platform.BRAINTREE;
                 this.name = 'BrainTree';
@@ -4591,7 +4606,6 @@ var CdvPurchase;
                 this.log = context.log.child("Braintree");
                 this.options = options;
             }
-            get receipts() { return this._receipts; }
             get isSupported() {
                 return Braintree.IosBridge.Bridge.isSupported() || Braintree.AndroidBridge.Bridge.isSupported();
             }
@@ -5463,6 +5477,9 @@ var CdvPurchase;
         }
         GooglePlay.Receipt = Receipt;
         class Adapter {
+            /** List of products managed by the GooglePlay adapter */
+            get products() { return this._products.products; }
+            get receipts() { return this._receipts; }
             constructor(context, autoRefreshIntervalMillis = 1000 * 3600 * 24) {
                 /** Adapter identifier */
                 this.id = CdvPurchase.Platform.GOOGLE_PLAY;
@@ -5490,9 +5507,6 @@ var CdvPurchase;
                 this.log = context.log.child('GooglePlay');
                 Adapter._instance = this;
             }
-            /** List of products managed by the GooglePlay adapter */
-            get products() { return this._products.products; }
-            get receipts() { return this._receipts; }
             /** Returns true on Android, the only platform supported by this adapter */
             get isSupported() {
                 return CdvPurchase.Utils.platformId() === 'android';
@@ -6765,6 +6779,17 @@ var CdvPurchase;
         }
         IapticJS.Transaction = Transaction;
         class Adapter {
+            get receipts() { return this._receipts; }
+            upsertProduct(product) {
+                this.log.debug(`upsertProduct(${product.id})`);
+                const existingIndex = this.products.findIndex(p => p.id === product.id);
+                if (existingIndex >= 0) {
+                    this.products[existingIndex] = product;
+                }
+                else {
+                    this.products.push(product);
+                }
+            }
             constructor(context, options) {
                 this.id = CdvPurchase.Platform.IAPTIC_JS;
                 this.name = 'IapticJS';
@@ -6778,17 +6803,6 @@ var CdvPurchase;
                 this.log = context.log.child("IapticJS");
                 this.options = options;
                 this.backendAdapterType = options.type;
-            }
-            get receipts() { return this._receipts; }
-            upsertProduct(product) {
-                this.log.debug(`upsertProduct(${product.id})`);
-                const existingIndex = this.products.findIndex(p => p.id === product.id);
-                if (existingIndex >= 0) {
-                    this.products[existingIndex] = product;
-                }
-                else {
-                    this.products.push(product);
-                }
             }
             get isSupported() {
                 // Check for the global IapticJS object
@@ -8301,6 +8315,10 @@ var CdvPurchase;
 (function (CdvPurchase) {
     /** Receipt data as validated by the receipt validation server */
     class VerifiedReceipt {
+        /** Platform this receipt originated from */
+        get platform() { return this.sourceReceipt.platform; }
+        /** Get raw response data from the receipt validation request */
+        get raw() { return {}; } // actual implementation as "defineProperty" in constructor.
         /**
          * @internal
          */
@@ -8318,10 +8336,6 @@ var CdvPurchase;
             Object.defineProperty(this, 'raw', { 'enumerable': false, get() { return response; } });
             Object.defineProperty(this, 'finish', { 'enumerable': false, get() { return () => decorator.finish(this); } });
         }
-        /** Platform this receipt originated from */
-        get platform() { return this.sourceReceipt.platform; }
-        /** Get raw response data from the receipt validation request */
-        get raw() { return {}; } // actual implementation as "defineProperty" in constructor.
         /**
          * Update the receipt content
          *

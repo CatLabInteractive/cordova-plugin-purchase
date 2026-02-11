@@ -121,6 +121,22 @@ namespace CdvPurchase {
 
                     const iabReady = () => {
                         this.log.debug("Ready");
+                        this.initialized = true;
+                        this.ready = true;
+
+                        // Listen for app resume events and refresh purchases
+                        // from the JS side.  The Java onResume handler also calls
+                        // getPurchaseUpdates, but its PluginResult may not be
+                        // delivered reliably when the WebView was paused during
+                        // the Amazon purchase overlay.  Calling from JS guarantees
+                        // the bridge callback is active.
+                        document.addEventListener('resume', () => {
+                            if (this.initialized) {
+                                this.log.debug("App resumed — refreshing purchases from JS");
+                                this.getPurchaseUpdates();
+                            }
+                        }, false);
+
                         resolve(undefined);
                     }
 

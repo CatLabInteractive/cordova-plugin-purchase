@@ -3145,7 +3145,15 @@ var CdvPurchase;
                     if (this.options.showLog) {
                         log('purchase()');
                     }
-                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
+                    const self = this;
+                    return window.cordova.exec(function (result) {
+                        // Process purchase data delivered directly via the callback
+                        if (result && result.purchases && self.options.onPurchasesUpdated) {
+                            self.options.onPurchasesUpdated(result.purchases);
+                        }
+                        if (success)
+                            success();
+                    }, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
                 }
                 notifyFulfillment(receiptId, success, fail) {
                     if (this.options.showLog) {
@@ -3157,7 +3165,15 @@ var CdvPurchase;
                     if (this.options.showLog) {
                         log('getPurchaseUpdates()');
                     }
-                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);
+                    const self = this;
+                    return window.cordova.exec(function (result) {
+                        // Process purchase data delivered directly via the callback
+                        if (result && result.purchases && self.options.onSetPurchases) {
+                            self.options.onSetPurchases(result.purchases);
+                        }
+                        if (success)
+                            success();
+                    }, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);
                 }
             }
             Bridge_1.Bridge = Bridge;

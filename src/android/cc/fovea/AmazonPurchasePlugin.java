@@ -78,18 +78,15 @@ public final class AmazonPurchasePlugin
     }
 
     /**
-     * Called when the activity resumes (e.g. after returning from the Amazon
-     * purchase screen).  Per Amazon's documentation, getPurchaseUpdates should
-     * be called in onResume to pick up any purchases that completed while the
-     * app was in the background — broadcast delivery is unreliable on Fire TV.
+     * Called when the activity resumes.  We no longer call
+     * getPurchaseUpdates here — the JavaScript-side resume handler does
+     * that via the bridge, which guarantees the callback context is set
+     * and the response data is delivered directly to JS.
      */
     @Override
     public void onResume(boolean multitasking) {
         super.onResume(multitasking);
-        if (mInitialized) {
-            Log.d(mTag, "onResume — refreshing purchase updates");
-            PurchasingService.getPurchaseUpdates(false);
-        }
+        // Intentionally empty — JS resume handler refreshes purchases.
     }
 
     @Override
@@ -182,8 +179,10 @@ public final class AmazonPurchasePlugin
                     mCallbackContext.success();
                     mCallbackContext = null;
                 }
-                // Get initial purchase updates
-                PurchasingService.getPurchaseUpdates(false);
+                // Note: do NOT call getPurchaseUpdates here.
+                // loadReceipts() on the JS side will call it via the
+                // bridge, which guarantees the callback is set and the
+                // response data reaches JavaScript reliably.
                 break;
             case FAILED:
             case NOT_SUPPORTED:
@@ -251,14 +250,22 @@ public final class AmazonPurchasePlugin
                 Receipt receipt = response.getReceipt();
                 try {
                     JSONObject purchaseJson = receiptToJson(receipt);
-                    // Notify listener about the purchase
-                    sendPurchasesUpdated(new JSONArray().put(purchaseJson));
+                    JSONArray purchasesArray = new JSONArray().put(purchaseJson);
+                    // Notify listener about the purchase (backup path)
+                    sendPurchasesUpdated(purchasesArray);
+                    // Send purchase data directly via the callback (primary path)
+                    if (mPurchaseCallback != null) {
+                        JSONObject result = new JSONObject();
+                        result.put("purchases", purchasesArray);
+                        mPurchaseCallback.success(result);
+                        mPurchaseCallback = null;
+                    }
                 } catch (JSONException e) {
                     Log.e(mTag, "Error creating purchase JSON: " + e.getMessage());
-                }
-                if (mPurchaseCallback != null) {
-                    mPurchaseCallback.success();
-                    mPurchaseCallback = null;
+                    if (mPurchaseCallback != null) {
+                        mPurchaseCallback.success();
+                        mPurchaseCallback = null;
+                    }
                 }
                 break;
             case FAILED:
@@ -303,7 +310,7 @@ public final class AmazonPurchasePlugin
                         }
                     }
 
-                    // If this is during init, send as setPurchases
+                    // Send via listener (backup path)
                     if (mListenerContext != null) {
                         sendSetPurchases(purchasesArray);
                     }
@@ -313,8 +320,11 @@ public final class AmazonPurchasePlugin
                         PurchasingService.getPurchaseUpdates(false);
                     }
 
+                    // Send purchase data directly via the callback (primary path)
                     if (mGetPurchaseUpdatesCallback != null) {
-                        mGetPurchaseUpdatesCallback.success();
+                        JSONObject result = new JSONObject();
+                        result.put("purchases", purchasesArray);
+                        mGetPurchaseUpdatesCallback.success(result);
                         mGetPurchaseUpdatesCallback = null;
                     }
                 } catch (JSONException e) {

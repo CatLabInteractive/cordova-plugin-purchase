@@ -155,6 +155,19 @@ SOFTWARE.
             />
         </feature>
       </config-file>
+
+      <!-- Amazon IAP ResponseReceiver: required by the Amazon Appstore SDK to
+        deliver purchase response broadcasts back to the app. Without this,
+        the app never receives purchase completion notifications. -->
+      <config-file target="AndroidManifest.xml" parent="/manifest/application">
+        <receiver android:name="com.amazon.device.iap.ResponseReceiver"
+                  android:exported="true"
+                  android:permission="com.amazon.inapp.purchasing.Permission.NOTIFY">
+          <intent-filter>
+            <action android:name="com.amazon.inapp.purchasing.NOTIFY" />
+          </intent-filter>
+        </receiver>
+      </config-file>
     </platform>
 
     <platform name="browser">

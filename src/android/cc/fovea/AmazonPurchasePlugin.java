@@ -186,7 +186,10 @@ public final class AmazonPurchasePlugin
                 mUserData = response.getUserData();
                 Log.d(TAG, "User ID: " + mUserData.getUserId()
                         + ", Marketplace: " + mUserData.getMarketplace());
-                if (cb != null) { cb.success(); mInitCallback = null; }
+                if (cb != null) {
+                    cb.success();
+                    mInitCallback = null;
+                }
                 break;
             case FAILED:
             case NOT_SUPPORTED:
@@ -259,19 +262,34 @@ public final class AmazonPurchasePlugin
                 } catch (JSONException e) {
                     Log.e(TAG, "Error creating purchase JSON: " + e.getMessage());
                 }
-                if (cb != null) { cb.success(); mPurchaseCallback = null; }
+                if (cb != null) {
+                    cb.success();
+                    mPurchaseCallback = null;
+                }
                 break;
             case FAILED:
-                if (cb != null) { cb.error("Purchase failed"); mPurchaseCallback = null; }
+                if (cb != null) {
+                    cb.error("Purchase failed");
+                    mPurchaseCallback = null;
+                }
                 break;
             case INVALID_SKU:
-                if (cb != null) { cb.error("Invalid SKU"); mPurchaseCallback = null; }
+                if (cb != null) {
+                    cb.error("Invalid SKU");
+                    mPurchaseCallback = null;
+                }
                 break;
             case ALREADY_PURCHASED:
-                if (cb != null) { cb.error("Already purchased"); mPurchaseCallback = null; }
+                if (cb != null) {
+                    cb.error("Already purchased");
+                    mPurchaseCallback = null;
+                }
                 break;
             case NOT_SUPPORTED:
-                if (cb != null) { cb.error("Not supported"); mPurchaseCallback = null; }
+                if (cb != null) {
+                    cb.error("Not supported");
+                    mPurchaseCallback = null;
+                }
                 break;
         }
     }
@@ -304,7 +322,10 @@ public final class AmazonPurchasePlugin
                     Log.e(TAG, "Error parsing purchase updates: " + e.getMessage());
                 }
                 // Signal success (no data — data goes through listener)
-                if (cb != null) { cb.success(); mGetPurchaseUpdatesCallback = null; }
+                if (cb != null) {
+                    cb.success();
+                    mGetPurchaseUpdatesCallback = null;
+                }
                 break;
             case FAILED:
             case NOT_SUPPORTED:

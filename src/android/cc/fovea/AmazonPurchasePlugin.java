@@ -1,13 +1,22 @@
 /**
- * The Cordova Purchase Plugin for Amazon AppStore.
+ * Cordova plugin for Amazon AppStore In-App Purchasing.
  *
- * The plugin has methods for:
+ * Architecture:
  *
- * - initializing the Amazon IAP SDK,
- * - querying product details
- * - making purchases
- * - fulfilling consumable purchases.
- * - handling purchase updates and errors.
+ *   All purchase data flows through a single persistent listener
+ *   callback (setListener), matching the pattern used by the Google
+ *   Play adapter.  Per-request callbacks (purchase, getPurchaseUpdates)
+ *   signal success/failure only and never carry purchase data.
+ *
+ *   This avoids race conditions between per-request callbacks and the
+ *   PurchasingListener, which is invoked on arbitrary threads by the
+ *   Amazon SDK.  The listener uses setKeepCallback(true) so it remains
+ *   active for the lifetime of the plugin.
+ *
+ *   On resume the plugin calls getPurchaseUpdates(false) so that any
+ *   purchases completed while the app was backgrounded (e.g. during
+ *   the Amazon purchase overlay) are delivered reliably through the
+ *   listener.
  */
 
 package cc.fovea;
@@ -34,162 +43,157 @@ import com.amazon.device.iap.model.Receipt;
 import com.amazon.device.iap.model.UserData;
 import com.amazon.device.iap.model.UserDataResponse;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Plugin implementation for Amazon AppStore.
- */
 public final class AmazonPurchasePlugin
         extends CordovaPlugin
         implements PurchasingListener {
 
-    /** Tag used for log messages. */
-    private final String mTag = "CdvPurchase/Amazon";
+    private static final String TAG = "CdvPurchase/Amazon";
 
-    /** Context for the last plugin call. */
-    private CallbackContext mCallbackContext;
+    // ---- Callback contexts ------------------------------------------------
 
-    /** Callback context for the listener. */
-    private CallbackContext mListenerContext;
+    /** Persistent listener – receives all purchase data. */
+    private volatile CallbackContext mListenerContext;
 
-    /** Callback context for getProductData calls. */
-    private CallbackContext mGetProductDataCallback;
+    /** One-shot callback for the init request. */
+    private volatile CallbackContext mInitCallback;
 
-    /** Callback context for purchase calls. */
-    private CallbackContext mPurchaseCallback;
+    /** One-shot callback for getProductData. */
+    private volatile CallbackContext mGetProductDataCallback;
 
-    /** Callback context for getPurchaseUpdates calls. */
-    private CallbackContext mGetPurchaseUpdatesCallback;
+    /** One-shot callback for purchase – signals success/failure only. */
+    private volatile CallbackContext mPurchaseCallback;
 
-    /** Current user data. */
-    private UserData mUserData;
+    /** One-shot callback for getPurchaseUpdates – signals success/failure only. */
+    private volatile CallbackContext mGetPurchaseUpdatesCallback;
 
-    /** Whether the plugin is initialized. */
-    private boolean mInitialized = false;
+    /** Current Amazon user data (set after successful getUserData). */
+    private volatile UserData mUserData;
+
+    /** Whether the SDK has been initialized. */
+    private volatile boolean mInitialized = false;
+
+    // ---- Cordova lifecycle ------------------------------------------------
 
     @Override
     public void initialize(final CordovaInterface cordova, final CordovaWebView webView) {
         super.initialize(cordova, webView);
-        Log.d(mTag, "initialize()");
+        Log.d(TAG, "initialize()");
     }
 
     /**
-     * Called when the activity resumes.  We no longer call
-     * getPurchaseUpdates here — the JavaScript-side resume handler does
-     * that via the bridge, which guarantees the callback context is set
-     * and the response data is delivered directly to JS.
+     * When the activity resumes, poll for purchase updates so that any
+     * purchases completed while the app was backgrounded are delivered
+     * through the listener.
      */
     @Override
     public void onResume(boolean multitasking) {
         super.onResume(multitasking);
-        // Intentionally empty — JS resume handler refreshes purchases.
+        if (mInitialized) {
+            Log.d(TAG, "onResume — calling getPurchaseUpdates(false)");
+            PurchasingService.getPurchaseUpdates(false);
+        }
     }
+
+    // ---- Cordova execute --------------------------------------------------
 
     @Override
     public boolean execute(final String action, final JSONArray args,
                            final CallbackContext callbackContext) throws JSONException {
-        Log.d(mTag, "execute(" + action + ")");
+        Log.d(TAG, "execute(" + action + ")");
 
-        if ("setListener".equals(action)) {
-            mListenerContext = callbackContext;
-            sendNoResult(callbackContext);
-            return true;
-        }
+        switch (action) {
+            case "setListener":
+                mListenerContext = callbackContext;
+                keepCallback(callbackContext);
+                return true;
 
-        if ("init".equals(action)) {
-            mCallbackContext = callbackContext;
-            initAmazonIAP();
-            return true;
-        }
+            case "init":
+                mInitCallback = callbackContext;
+                initAmazonIAP();
+                return true;
 
-        if ("getProductData".equals(action)) {
-            mGetProductDataCallback = callbackContext;
-            JSONArray skusArray = args.getJSONArray(0);
-            Set<String> skus = new HashSet<>();
-            for (int i = 0; i < skusArray.length(); i++) {
-                skus.add(skusArray.getString(i));
+            case "getProductData": {
+                mGetProductDataCallback = callbackContext;
+                JSONArray skusArray = args.getJSONArray(0);
+                Set<String> skus = new HashSet<>();
+                for (int i = 0; i < skusArray.length(); i++) {
+                    skus.add(skusArray.getString(i));
+                }
+                PurchasingService.getProductData(skus);
+                return true;
             }
-            PurchasingService.getProductData(skus);
-            return true;
-        }
 
-        if ("purchase".equals(action)) {
-            mPurchaseCallback = callbackContext;
-            String productId = args.getString(0);
-            PurchasingService.purchase(productId);
-            return true;
-        }
+            case "purchase": {
+                mPurchaseCallback = callbackContext;
+                String productId = args.getString(0);
+                PurchasingService.purchase(productId);
+                return true;
+            }
 
-        if ("notifyFulfillment".equals(action)) {
-            String receiptId = args.getString(0);
-            PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED);
-            callbackContext.success();
-            return true;
-        }
+            case "notifyFulfillment": {
+                String receiptId = args.getString(0);
+                PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED);
+                callbackContext.success();
+                return true;
+            }
 
-        if ("getPurchaseUpdates".equals(action)) {
-            mGetPurchaseUpdatesCallback = callbackContext;
-            PurchasingService.getPurchaseUpdates(false);
-            return true;
-        }
+            case "getPurchaseUpdates":
+                mGetPurchaseUpdatesCallback = callbackContext;
+                PurchasingService.getPurchaseUpdates(false);
+                return true;
 
-        return false;
+            default:
+                return false;
+        }
     }
 
-    /**
-     * Initialize the Amazon IAP SDK.
-     *
-     * PurchasingService.registerListener() must be called on the main UI thread.
-     */
+    // ---- SDK initialization -----------------------------------------------
+
     private void initAmazonIAP() {
-        Log.d(mTag, "initAmazonIAP()");
-        cordova.getActivity().runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    PurchasingService.registerListener(cordova.getActivity().getApplicationContext(), AmazonPurchasePlugin.this);
-                    PurchasingService.getUserData();
-                    mInitialized = true;
-                } catch (Exception e) {
-                    Log.e(mTag, "Failed to initialize Amazon IAP: " + e.getMessage());
-                    if (mCallbackContext != null) {
-                        mCallbackContext.error("Failed to initialize Amazon IAP: " + e.getMessage());
-                        mCallbackContext = null;
-                    }
+        Log.d(TAG, "initAmazonIAP()");
+        cordova.getActivity().runOnUiThread(() -> {
+            try {
+                PurchasingService.registerListener(
+                        cordova.getActivity().getApplicationContext(),
+                        AmazonPurchasePlugin.this);
+                PurchasingService.getUserData();
+                mInitialized = true;
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to initialize Amazon IAP: " + e.getMessage());
+                CallbackContext cb = mInitCallback;
+                if (cb != null) {
+                    cb.error("Failed to initialize Amazon IAP: " + e.getMessage());
+                    mInitCallback = null;
                 }
             }
         });
     }
 
-    // ---- PurchasingListener implementation ----
+    // ---- PurchasingListener -----------------------------------------------
 
     @Override
     public void onUserDataResponse(final UserDataResponse response) {
-        Log.d(mTag, "onUserDataResponse: " + response.getRequestStatus());
+        Log.d(TAG, "onUserDataResponse: " + response.getRequestStatus());
+        CallbackContext cb = mInitCallback;
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:
                 mUserData = response.getUserData();
-                Log.d(mTag, "User ID: " + mUserData.getUserId() + ", Marketplace: " + mUserData.getMarketplace());
-                if (mCallbackContext != null) {
-                    mCallbackContext.success();
-                    mCallbackContext = null;
-                }
-                // Note: do NOT call getPurchaseUpdates here.
-                // loadReceipts() on the JS side will call it via the
-                // bridge, which guarantees the callback is set and the
-                // response data reaches JavaScript reliably.
+                Log.d(TAG, "User ID: " + mUserData.getUserId()
+                        + ", Marketplace: " + mUserData.getMarketplace());
+                if (cb != null) { cb.success(); mInitCallback = null; }
                 break;
             case FAILED:
             case NOT_SUPPORTED:
-                Log.e(mTag, "onUserDataResponse failed: " + response.getRequestStatus());
-                if (mCallbackContext != null) {
-                    mCallbackContext.error("Failed to get user data: " + response.getRequestStatus());
-                    mCallbackContext = null;
+                Log.e(TAG, "onUserDataResponse failed: " + response.getRequestStatus());
+                if (cb != null) {
+                    cb.error("Failed to get user data: " + response.getRequestStatus());
+                    mInitCallback = null;
                 }
                 break;
         }
@@ -197,225 +201,167 @@ public final class AmazonPurchasePlugin
 
     @Override
     public void onProductDataResponse(final ProductDataResponse response) {
-        Log.d(mTag, "onProductDataResponse: " + response.getRequestStatus());
-
-        if (mGetProductDataCallback == null) return;
+        Log.d(TAG, "onProductDataResponse: " + response.getRequestStatus());
+        CallbackContext cb = mGetProductDataCallback;
+        if (cb == null) return;
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:
                 try {
                     JSONObject result = new JSONObject();
                     JSONArray productsArray = new JSONArray();
-
-                    Map<String, Product> products = response.getProductData();
-                    for (Map.Entry<String, Product> entry : products.entrySet()) {
+                    for (Map.Entry<String, Product> entry : response.getProductData().entrySet()) {
                         Product product = entry.getValue();
-                        JSONObject productJson = new JSONObject();
-                        productJson.put("productId", product.getSku());
-                        productJson.put("title", product.getTitle());
-                        productJson.put("description", product.getDescription());
-                        productJson.put("price", product.getPrice());
-                        productJson.put("productType", product.getProductType().toString());
-                        productsArray.put(productJson);
+                        JSONObject pj = new JSONObject();
+                        pj.put("productId", product.getSku());
+                        pj.put("title", product.getTitle());
+                        pj.put("description", product.getDescription());
+                        pj.put("price", product.getPrice());
+                        pj.put("productType", product.getProductType().toString());
+                        productsArray.put(pj);
                     }
                     result.put("products", productsArray);
-
-                    JSONArray unavailableArray = new JSONArray();
-                    Set<String> unavailable = response.getUnavailableSkus();
-                    for (String sku : unavailable) {
-                        unavailableArray.put(sku);
+                    JSONArray unavailable = new JSONArray();
+                    for (String sku : response.getUnavailableSkus()) {
+                        unavailable.put(sku);
                     }
-                    result.put("unavailableSkus", unavailableArray);
-
-                    mGetProductDataCallback.success(result);
+                    result.put("unavailableSkus", unavailable);
+                    cb.success(result);
                 } catch (JSONException e) {
-                    mGetProductDataCallback.error("Error parsing product data: " + e.getMessage());
+                    cb.error("Error parsing product data: " + e.getMessage());
                 }
                 mGetProductDataCallback = null;
                 break;
             case FAILED:
             case NOT_SUPPORTED:
-                mGetProductDataCallback.error("getProductData failed: " + response.getRequestStatus());
+                cb.error("getProductData failed: " + response.getRequestStatus());
                 mGetProductDataCallback = null;
                 break;
         }
     }
 
+    /**
+     * Purchase result.  Data is delivered through the listener;
+     * the per-request callback only signals success/failure.
+     */
     @Override
     public void onPurchaseResponse(final PurchaseResponse response) {
-        Log.d(mTag, "onPurchaseResponse: " + response.getRequestStatus());
+        Log.d(TAG, "onPurchaseResponse: " + response.getRequestStatus());
+        CallbackContext cb = mPurchaseCallback;
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:
                 Receipt receipt = response.getReceipt();
                 try {
-                    JSONObject purchaseJson = receiptToJson(receipt);
-                    JSONArray purchasesArray = new JSONArray().put(purchaseJson);
-                    // Notify listener about the purchase (backup path)
-                    sendPurchasesUpdated(purchasesArray);
-                    // Send purchase data directly via the callback (primary path)
-                    if (mPurchaseCallback != null) {
-                        JSONObject result = new JSONObject();
-                        result.put("purchases", purchasesArray);
-                        mPurchaseCallback.success(result);
-                        mPurchaseCallback = null;
-                    }
+                    JSONArray arr = new JSONArray();
+                    arr.put(receiptToJson(receipt));
+                    emitToListener("purchasesUpdated", arr);
                 } catch (JSONException e) {
-                    Log.e(mTag, "Error creating purchase JSON: " + e.getMessage());
-                    if (mPurchaseCallback != null) {
-                        mPurchaseCallback.success();
-                        mPurchaseCallback = null;
-                    }
+                    Log.e(TAG, "Error creating purchase JSON: " + e.getMessage());
                 }
+                if (cb != null) { cb.success(); mPurchaseCallback = null; }
                 break;
             case FAILED:
-                if (mPurchaseCallback != null) {
-                    mPurchaseCallback.error("Purchase failed");
-                    mPurchaseCallback = null;
-                }
+                if (cb != null) { cb.error("Purchase failed"); mPurchaseCallback = null; }
                 break;
             case INVALID_SKU:
-                if (mPurchaseCallback != null) {
-                    mPurchaseCallback.error("Invalid SKU");
-                    mPurchaseCallback = null;
-                }
+                if (cb != null) { cb.error("Invalid SKU"); mPurchaseCallback = null; }
                 break;
             case ALREADY_PURCHASED:
-                if (mPurchaseCallback != null) {
-                    mPurchaseCallback.error("Already purchased");
-                    mPurchaseCallback = null;
-                }
+                if (cb != null) { cb.error("Already purchased"); mPurchaseCallback = null; }
                 break;
             case NOT_SUPPORTED:
-                if (mPurchaseCallback != null) {
-                    mPurchaseCallback.error("Not supported");
-                    mPurchaseCallback = null;
-                }
+                if (cb != null) { cb.error("Not supported"); mPurchaseCallback = null; }
                 break;
         }
     }
 
+    /**
+     * Purchase-updates result (initial load & resume refresh).
+     * Data is delivered through the listener; the per-request callback
+     * only signals success/failure.
+     */
     @Override
     public void onPurchaseUpdatesResponse(final PurchaseUpdatesResponse response) {
-        Log.d(mTag, "onPurchaseUpdatesResponse: " + response.getRequestStatus());
+        Log.d(TAG, "onPurchaseUpdatesResponse: " + response.getRequestStatus());
+        CallbackContext cb = mGetPurchaseUpdatesCallback;
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:
                 try {
-                    JSONArray purchasesArray = new JSONArray();
-                    List<Receipt> receipts = response.getReceipts();
-                    for (Receipt receipt : receipts) {
-                        if (!receipt.isCanceled()) {
-                            purchasesArray.put(receiptToJson(receipt));
+                    JSONArray arr = new JSONArray();
+                    for (Receipt r : response.getReceipts()) {
+                        if (!r.isCanceled()) {
+                            arr.put(receiptToJson(r));
                         }
                     }
+                    emitToListener("setPurchases", arr);
 
-                    // Send via listener (backup path)
-                    if (mListenerContext != null) {
-                        sendSetPurchases(purchasesArray);
-                    }
-
-                    // If there are more pages, get them
                     if (response.hasMore()) {
                         PurchasingService.getPurchaseUpdates(false);
                     }
-
-                    // Send purchase data directly via the callback (primary path)
-                    if (mGetPurchaseUpdatesCallback != null) {
-                        JSONObject result = new JSONObject();
-                        result.put("purchases", purchasesArray);
-                        mGetPurchaseUpdatesCallback.success(result);
-                        mGetPurchaseUpdatesCallback = null;
-                    }
                 } catch (JSONException e) {
-                    Log.e(mTag, "Error parsing purchase updates: " + e.getMessage());
-                    if (mGetPurchaseUpdatesCallback != null) {
-                        mGetPurchaseUpdatesCallback.error("Error parsing purchase updates: " + e.getMessage());
-                        mGetPurchaseUpdatesCallback = null;
-                    }
+                    Log.e(TAG, "Error parsing purchase updates: " + e.getMessage());
                 }
+                // Signal success (no data — data goes through listener)
+                if (cb != null) { cb.success(); mGetPurchaseUpdatesCallback = null; }
                 break;
             case FAILED:
             case NOT_SUPPORTED:
-                Log.e(mTag, "onPurchaseUpdatesResponse failed: " + response.getRequestStatus());
-                if (mGetPurchaseUpdatesCallback != null) {
-                    mGetPurchaseUpdatesCallback.error("getPurchaseUpdates failed: " + response.getRequestStatus());
+                Log.e(TAG, "onPurchaseUpdatesResponse failed: " + response.getRequestStatus());
+                if (cb != null) {
+                    cb.error("getPurchaseUpdates failed: " + response.getRequestStatus());
                     mGetPurchaseUpdatesCallback = null;
                 }
                 break;
         }
     }
 
-    // ---- Helper methods ----
+    // ---- Helpers -----------------------------------------------------------
 
-    /**
-     * Convert an Amazon Receipt to a JSON object.
-     */
     private JSONObject receiptToJson(final Receipt receipt) throws JSONException {
         JSONObject json = new JSONObject();
         json.put("receiptId", receipt.getReceiptId());
         json.put("productId", receipt.getSku());
         json.put("productType", receipt.getProductType().toString());
-        json.put("purchaseDate", receipt.getPurchaseDate() != null ? receipt.getPurchaseDate().getTime() : 0);
+        json.put("purchaseDate",
+                receipt.getPurchaseDate() != null ? receipt.getPurchaseDate().getTime() : 0);
         json.put("canceled", receipt.isCanceled());
-        if (mUserData != null) {
-            json.put("userId", mUserData.getUserId());
-            json.put("marketplace", mUserData.getMarketplace());
+        UserData ud = mUserData;
+        if (ud != null) {
+            json.put("userId", ud.getUserId());
+            json.put("marketplace", ud.getMarketplace());
         }
         return json;
     }
 
     /**
-     * Send setPurchases message to the listener.
+     * Emit purchase data through the persistent listener.
+     *
+     * @param type      "purchasesUpdated" or "setPurchases"
+     * @param purchases JSON array of purchase objects
      */
-    private void sendSetPurchases(final JSONArray purchases) {
-        if (mListenerContext == null) return;
+    private void emitToListener(final String type, final JSONArray purchases) {
+        CallbackContext lc = mListenerContext;
+        if (lc == null) return;
         try {
             JSONObject msg = new JSONObject();
-            msg.put("type", "setPurchases");
+            msg.put("type", type);
             JSONObject data = new JSONObject();
             data.put("purchases", purchases);
             msg.put("data", data);
-            sendToListener(msg);
+            PluginResult pr = new PluginResult(PluginResult.Status.OK, msg);
+            pr.setKeepCallback(true);
+            lc.sendPluginResult(pr);
         } catch (JSONException e) {
-            Log.e(mTag, "Error sending setPurchases: " + e.getMessage());
+            Log.e(TAG, "Error emitting " + type + ": " + e.getMessage());
         }
     }
 
-    /**
-     * Send purchasesUpdated message to the listener.
-     */
-    private void sendPurchasesUpdated(final JSONArray purchases) {
-        if (mListenerContext == null) return;
-        try {
-            JSONObject msg = new JSONObject();
-            msg.put("type", "purchasesUpdated");
-            JSONObject data = new JSONObject();
-            data.put("purchases", purchases);
-            msg.put("data", data);
-            sendToListener(msg);
-        } catch (JSONException e) {
-            Log.e(mTag, "Error sending purchasesUpdated: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Send a message to the JavaScript listener.
-     */
-    private void sendToListener(final JSONObject msg) {
-        if (mListenerContext != null) {
-            PluginResult result = new PluginResult(PluginResult.Status.OK, msg);
-            result.setKeepCallback(true);
-            mListenerContext.sendPluginResult(result);
-        }
-    }
-
-    /**
-     * Send a no-result response that keeps the callback active.
-     */
-    private void sendNoResult(final CallbackContext callbackContext) {
-        PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
-        result.setKeepCallback(true);
-        callbackContext.sendPluginResult(result);
+    /** Keep the callback context alive (for setListener). */
+    private void keepCallback(final CallbackContext callbackContext) {
+        PluginResult pr = new PluginResult(PluginResult.Status.NO_RESULT);
+        pr.setKeepCallback(true);
+        callbackContext.sendPluginResult(pr);
     }
 }

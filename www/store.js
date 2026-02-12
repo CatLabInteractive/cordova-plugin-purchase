@@ -2853,18 +2853,6 @@ var CdvPurchase;
                             this.log.debug("Ready");
                             this.initialized = true;
                             this.ready = true;
-                            // Listen for app resume events and refresh purchases
-                            // from the JS side.  The Java onResume handler also calls
-                            // getPurchaseUpdates, but its PluginResult may not be
-                            // delivered reliably when the WebView was paused during
-                            // the Amazon purchase overlay.  Calling from JS guarantees
-                            // the bridge callback is active.
-                            document.addEventListener('resume', () => {
-                                if (this.initialized) {
-                                    this.log.debug("App resumed — refreshing purchases from JS");
-                                    this.getPurchaseUpdates();
-                                }
-                            }, false);
                             resolve(undefined);
                         };
                         const iabError = (err) => {
@@ -3145,12 +3133,9 @@ var CdvPurchase;
                     if (this.options.showLog) {
                         log('purchase()');
                     }
-                    const self = this;
-                    return window.cordova.exec(function (result) {
-                        // Process purchase data delivered directly via the callback
-                        if (result && result.purchases && self.options.onPurchasesUpdated) {
-                            self.options.onPurchasesUpdated(result.purchases);
-                        }
+                    // Purchase data arrives through the persistent listener,
+                    // not through this callback.
+                    return window.cordova.exec(function () {
                         if (success)
                             success();
                     }, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
@@ -3165,12 +3150,9 @@ var CdvPurchase;
                     if (this.options.showLog) {
                         log('getPurchaseUpdates()');
                     }
-                    const self = this;
-                    return window.cordova.exec(function (result) {
-                        // Process purchase data delivered directly via the callback
-                        if (result && result.purchases && self.options.onSetPurchases) {
-                            self.options.onSetPurchases(result.purchases);
-                        }
+                    // Purchase data arrives through the persistent listener,
+                    // not through this callback.
+                    return window.cordova.exec(function () {
                         if (success)
                             success();
                     }, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);

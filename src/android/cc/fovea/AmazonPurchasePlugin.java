@@ -11,6 +11,13 @@
  *   The listener uses setKeepCallback(true) so it remains active for
  *   the lifetime of the plugin.
  *
+ *   When a purchase is initiated, the plugin starts polling
+ *   getPurchaseUpdates(false) every 3 seconds until the purchase
+ *   result arrives via onPurchaseResponse.  This is necessary because
+ *   broadcast delivery from the Amazon Appstore is unreliable on
+ *   Fire TV devices — the ResponseReceiver broadcast may be blocked
+ *   by SELinux or never delivered.
+ *
  *   On resume the plugin delays 500ms before calling
  *   getPurchaseUpdates(false) so the WebView has time to process any
  *   queued messages and the JavaScript bridge is ready to receive
@@ -58,6 +65,9 @@ public final class AmazonPurchasePlugin
     /** Delay (ms) before refreshing purchases on resume. */
     private static final long RESUME_DELAY_MS = 500;
 
+    /** Interval (ms) for polling purchase updates while a purchase is in flight. */
+    private static final long POLL_INTERVAL_MS = 3000;
+
     // ---- Callback contexts ------------------------------------------------
 
     /** Persistent listener – receives all purchase data. */
@@ -81,11 +91,30 @@ public final class AmazonPurchasePlugin
     /** Whether the SDK has been initialized. */
     private volatile boolean mInitialized = false;
 
+    /** Whether a purchase is currently in flight (waiting for result). */
+    private volatile boolean mPurchaseInFlight = false;
+
     /** Pending purchases received while the listener may not be ready. */
     private final List<JSONObject> mPendingPurchases = new ArrayList<>();
 
     /** Handler for posting delayed work on the main thread. */
     private final Handler mHandler = new Handler(Looper.getMainLooper());
+
+    /** Runnable for periodic purchase polling. */
+    private final Runnable mPollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mInitialized) {
+                Log.d(TAG, "poll — calling getPurchaseUpdates(false)");
+                flushPendingPurchases();
+                PurchasingService.getPurchaseUpdates(false);
+            }
+            // Re-schedule as long as a purchase is still in flight
+            if (mPurchaseInFlight) {
+                mHandler.postDelayed(this, POLL_INTERVAL_MS);
+            }
+        }
+    };
 
     // ---- Cordova lifecycle ------------------------------------------------
 
@@ -93,6 +122,13 @@ public final class AmazonPurchasePlugin
     public void initialize(final CordovaInterface cordova, final CordovaWebView webView) {
         super.initialize(cordova, webView);
         Log.d(TAG, "initialize()");
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        mPurchaseInFlight = false;
+        mHandler.removeCallbacks(mPollRunnable);
     }
 
     /**
@@ -147,8 +183,13 @@ public final class AmazonPurchasePlugin
 
             case "purchase": {
                 mPurchaseCallback = callbackContext;
+                mPurchaseInFlight = true;
                 String productId = args.getString(0);
                 PurchasingService.purchase(productId);
+                // Start polling for purchase results in case the
+                // broadcast / listener events are not delivered
+                // (common on Fire TV).
+                mHandler.postDelayed(mPollRunnable, POLL_INTERVAL_MS);
                 return true;
             }
 
@@ -270,6 +311,10 @@ public final class AmazonPurchasePlugin
     public void onPurchaseResponse(final PurchaseResponse response) {
         Log.d(TAG, "onPurchaseResponse: " + response.getRequestStatus());
         CallbackContext cb = mPurchaseCallback;
+
+        // Purchase completed — stop polling.
+        mPurchaseInFlight = false;
+        mHandler.removeCallbacks(mPollRunnable);
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:

@@ -40,6 +40,12 @@ SOFTWARE.
 	<license>MIT</license>
     <keywords>cordova,phonegap,purchase,purchases,storekit,billing,ios,android,play,appstore,amazon,windows,osx,macos</keywords>
 
+    <!-- Copy AppstoreAuthenticationKey.pem from project root to Android assets
+      if the file exists. Required by the Amazon Appstore SDK for DRM verification. -->
+    <hook type="after_prepare" src="scripts/copy-amazon-auth-key.js" />
+    <hook type="before_compile" src="scripts/copy-amazon-auth-key.js" />
+    <hook type="before_build" src="scripts/copy-amazon-auth-key.js" />
+
     <!-- ios -->
     <platform name="ios">
         <!-- dependency id="cordova-plugin-add-swift-support" version="2.0.2" / -->
@@ -139,6 +145,19 @@ SOFTWARE.
             />
         </feature>
       </config-file>
+
+        <!-- Amazon IAP ResponseReceiver: required by the Amazon Appstore SDK to
+          deliver purchase response broadcasts back to the app. Without this,
+          the app never receives purchase completion notifications. -->
+        <config-file target="AndroidManifest.xml" parent="/manifest/application">
+            <receiver android:name="com.amazon.device.iap.ResponseReceiver"
+                      android:exported="true"
+                      android:permission="com.amazon.inapp.purchasing.Permission.NOTIFY">
+                <intent-filter>
+                    <action android:name="com.amazon.inapp.purchasing.NOTIFY" />
+                </intent-filter>
+            </receiver>
+        </config-file>
     </platform>
 
     <platform name="browser">

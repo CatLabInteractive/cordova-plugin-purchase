@@ -63,7 +63,11 @@ namespace CdvPurchase {
                     if (this.options.showLog) {
                         log('purchase()');
                     }
-                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
+                    // Purchase data arrives through the persistent listener,
+                    // not through this callback.
+                    return window.cordova.exec(function() {
+                        if (success) success();
+                    }, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
                 }
 
                 notifyFulfillment(receiptId: string, success: () => void, fail: ErrorCallback) {
@@ -77,7 +81,11 @@ namespace CdvPurchase {
                     if (this.options.showLog) {
                         log('getPurchaseUpdates()');
                     }
-                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);
+                    // Purchase data arrives through the persistent listener,
+                    // not through this callback.
+                    return window.cordova.exec(function() {
+                        if (success) success();
+                    }, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);
                 }
             }
 

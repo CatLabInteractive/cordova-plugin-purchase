@@ -2607,6 +2607,413 @@ var CdvPurchase;
         Internal.VerifiedReceipts = VerifiedReceipts;
     })(Internal = CdvPurchase.Internal || (CdvPurchase.Internal = {}));
 })(CdvPurchase || (CdvPurchase = {}));
+/// <reference path="../../receipt.ts" />
+/// <reference path="../../transaction.ts" />
+var CdvPurchase;
+(function (CdvPurchase) {
+    let AmazonAppStore;
+    (function (AmazonAppStore) {
+        class Transaction extends CdvPurchase.Transaction {
+            constructor(purchase, parentReceipt, decorator) {
+                super(CdvPurchase.Platform.AMAZON_APPSTORE, parentReceipt, decorator);
+                this.nativePurchase = purchase;
+                this.refresh(purchase, true);
+            }
+            static toState(purchase, fromConstructor) {
+                if (purchase.canceled)
+                    return CdvPurchase.TransactionState.CANCELLED;
+                if (fromConstructor)
+                    return CdvPurchase.TransactionState.INITIATED;
+                return CdvPurchase.TransactionState.APPROVED;
+            }
+            /**
+             * Refresh the transaction based on the native purchase update
+             */
+            refresh(purchase, fromConstructor) {
+                this.nativePurchase = purchase;
+                this.transactionId = purchase.receiptId;
+                this.purchaseId = purchase.receiptId;
+                this.products = [{ id: purchase.productId }];
+                if (purchase.purchaseDate)
+                    this.purchaseDate = new Date(purchase.purchaseDate);
+                this.state = Transaction.toState(purchase, fromConstructor !== null && fromConstructor !== void 0 ? fromConstructor : false);
+            }
+        }
+        AmazonAppStore.Transaction = Transaction;
+        class Receipt extends CdvPurchase.Receipt {
+            /** @internal */
+            constructor(purchase, decorator) {
+                super(CdvPurchase.Platform.AMAZON_APPSTORE, decorator);
+                this.transactions = [new Transaction(purchase, this, decorator)];
+                this.receiptId = purchase.receiptId;
+            }
+            /** Refresh the content of the receipt based on the native purchase */
+            refreshPurchase(purchase) {
+                var _a;
+                (_a = this.transactions[0]) === null || _a === void 0 ? void 0 : _a.refresh(purchase);
+            }
+        }
+        AmazonAppStore.Receipt = Receipt;
+        class Adapter {
+            constructor(context) {
+                /** Adapter identifier */
+                this.id = CdvPurchase.Platform.AMAZON_APPSTORE;
+                /** Adapter name */
+                this.name = 'AmazonAppStore';
+                /** Has the adapter been successfully initialized */
+                this.ready = false;
+                this.supportsParallelLoading = false;
+                this._products = [];
+                this._receipts = [];
+                /** The Amazon bridge */
+                this.bridge = new AmazonAppStore.Bridge.Bridge();
+                /** Prevent double initialization */
+                this.initialized = false;
+                /** Used to retry failed commands */
+                this.retry = new CdvPurchase.Internal.Retry();
+                if (Adapter._instance)
+                    throw new Error('AmazonAppStore adapter already initialized');
+                this.context = context;
+                this.log = context.log.child('AmazonAppStore');
+                Adapter._instance = this;
+            }
+            /** List of products managed by the adapter */
+            get products() { return this._products; }
+            get receipts() { return this._receipts; }
+            /** Returns true on Android, the platform supported by this adapter */
+            get isSupported() {
+                return CdvPurchase.Utils.platformId() === 'android';
+            }
+            initialize() {
+                return __awaiter(this, void 0, void 0, function* () {
+                    this.log.info("Initialize");
+                    if (this.initializationPromise)
+                        return this.initializationPromise;
+                    return this.initializationPromise = new Promise((resolve) => {
+                        const bridgeLogger = this.log.child('Bridge');
+                        const options = {
+                            onSetPurchases: this.onSetPurchases.bind(this),
+                            onPurchasesUpdated: this.onPurchasesUpdated.bind(this),
+                            onPurchaseFulfilled: this.onPurchaseFulfilled.bind(this),
+                            showLog: this.context.verbosity >= CdvPurchase.LogLevel.DEBUG ? true : false,
+                            log: (msg) => bridgeLogger.info(msg),
+                        };
+                        const iabReady = () => {
+                            this.log.debug("Ready");
+                            resolve(undefined);
+                        };
+                        const iabError = (err) => {
+                            this.initialized = false;
+                            this.context.error(amazonError(CdvPurchase.ErrorCode.SETUP, "Init failed - " + err, null));
+                            this.retry.retry(() => this.initialize());
+                        };
+                        this.bridge.init(iabReady, iabError, options);
+                    });
+                });
+            }
+            /** @inheritdoc */
+            loadReceipts() {
+                return new Promise((resolve) => {
+                    this.getPurchaseUpdates()
+                        .then(() => {
+                        resolve(this._receipts);
+                    });
+                });
+            }
+            /** @inheritDoc */
+            loadProducts(products) {
+                return new Promise((resolve) => {
+                    this.log.debug("Load: " + JSON.stringify(products));
+                    const skus = products.map(p => p.id);
+                    const go = () => {
+                        this.bridge.getProductData(skus, (response) => {
+                            this.log.debug("Loaded: " + JSON.stringify(response));
+                            if (!response || !Array.isArray(response.products)) {
+                                const message = `Invalid product data received: ${JSON.stringify(response)}, retrying later...`;
+                                this.log.warn(message);
+                                this.retry.retry(go);
+                                this.context.error(amazonError(CdvPurchase.ErrorCode.LOAD, message, null));
+                                return;
+                            }
+                            const ret = products.map(registeredProduct => {
+                                const amazonProduct = response.products.find(ap => ap.productId === registeredProduct.id);
+                                if (amazonProduct) {
+                                    return this.addProduct(registeredProduct, amazonProduct);
+                                }
+                                else {
+                                    return amazonError(CdvPurchase.ErrorCode.INVALID_PRODUCT_ID, `Product with id ${registeredProduct.id} not found.`, registeredProduct.id);
+                                }
+                            });
+                            resolve(ret);
+                        }, (err) => {
+                            this.retry.retry(go);
+                            this.context.error(amazonError(CdvPurchase.ErrorCode.LOAD, 'Loading product info failed - ' + err + ' - retrying later...', null));
+                        });
+                    };
+                    go();
+                });
+            }
+            addProduct(registeredProduct, amazonProduct) {
+                var _a, _b;
+                const existingProduct = this._products.find(p => p.id === registeredProduct.id);
+                const p = existingProduct !== null && existingProduct !== void 0 ? existingProduct : new CdvPurchase.Product(registeredProduct, this.context.apiDecorators);
+                p.title = amazonProduct.title || p.title;
+                p.description = amazonProduct.description || p.description;
+                const pricingPhases = [{
+                        price: (_a = amazonProduct.price) !== null && _a !== void 0 ? _a : '',
+                        priceMicros: (_b = amazonProduct.priceMicros) !== null && _b !== void 0 ? _b : 0,
+                        currency: amazonProduct.currency,
+                        recurrenceMode: CdvPurchase.RecurrenceMode.NON_RECURRING,
+                    }];
+                const offer = new CdvPurchase.Offer({ id: amazonProduct.productId, product: p, pricingPhases }, this.context.apiDecorators);
+                p.offers = [offer];
+                if (!existingProduct) {
+                    this._products.push(p);
+                }
+                return p;
+            }
+            /** @inheritDoc */
+            finish(transaction) {
+                return new Promise(resolve => {
+                    var _a;
+                    const onSuccess = () => {
+                        if (transaction.state !== CdvPurchase.TransactionState.FINISHED) {
+                            transaction.state = CdvPurchase.TransactionState.FINISHED;
+                            this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [transaction.parentReceipt]);
+                        }
+                        resolve(undefined);
+                    };
+                    const amazonTransaction = transaction;
+                    const receiptId = (_a = amazonTransaction.nativePurchase) === null || _a === void 0 ? void 0 : _a.receiptId;
+                    if (!receiptId)
+                        return resolve(amazonError(CdvPurchase.ErrorCode.FINISH, 'Cannot finish transaction, no receiptId found.', null));
+                    const onFailure = (message, code) => resolve(amazonError(code || CdvPurchase.ErrorCode.UNKNOWN, message, null));
+                    // Amazon IAP uses notifyFulfillment for all product types
+                    this.bridge.notifyFulfillment(receiptId, onSuccess, onFailure);
+                });
+            }
+            /** Called by the bridge when a purchase has been fulfilled */
+            onPurchaseFulfilled(purchase) {
+                this.log.debug("onPurchaseFulfilled: " + purchase.receiptId);
+                this.onPurchasesUpdated([purchase]);
+            }
+            /**
+             * Called when the platform reports initial purchases
+             */
+            onSetPurchases(purchases) {
+                this.log.debug("onSetPurchases: " + JSON.stringify(purchases));
+                this.onPurchasesUpdated(purchases);
+                this.context.listener.receiptsReady(CdvPurchase.Platform.AMAZON_APPSTORE);
+            }
+            /**
+             * Called when the platform reports updates for some purchases
+             */
+            onPurchasesUpdated(purchases) {
+                this.log.debug("onPurchasesUpdated: " + purchases.map(p => p.receiptId).join(', '));
+                purchases.forEach(purchase => {
+                    if (purchase.canceled)
+                        return; // skip canceled purchases
+                    const existingReceipt = this._receipts.find(r => r.receiptId === purchase.receiptId);
+                    if (existingReceipt) {
+                        existingReceipt.refreshPurchase(purchase);
+                        this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [existingReceipt]);
+                    }
+                    else {
+                        const newReceipt = new Receipt(purchase, this.context.apiDecorators);
+                        this._receipts.push(newReceipt);
+                        this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [newReceipt]);
+                        if (newReceipt.transactions[0].state === CdvPurchase.TransactionState.INITIATED && !newReceipt.transactions[0].isPending) {
+                            newReceipt.refreshPurchase(purchase);
+                            this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [newReceipt]);
+                        }
+                    }
+                });
+            }
+            /** Refresh purchases from Amazon */
+            getPurchaseUpdates() {
+                return new Promise(resolve => {
+                    this.log.debug('getPurchaseUpdates');
+                    const success = () => {
+                        this.log.debug('getPurchaseUpdates success');
+                        setTimeout(() => resolve(undefined), 0);
+                    };
+                    const failure = (message, code) => {
+                        this.log.warn('getPurchaseUpdates failed: ' + message + ' (' + code + ')');
+                        setTimeout(() => resolve(amazonError(code || CdvPurchase.ErrorCode.UNKNOWN, message, null)), 0);
+                    };
+                    this.bridge.getPurchaseUpdates(success, failure);
+                });
+            }
+            /** @inheritDoc */
+            order(offer, additionalData) {
+                return __awaiter(this, void 0, void 0, function* () {
+                    return new Promise(resolve => {
+                        this.log.info("Order - " + JSON.stringify(offer));
+                        const buySuccess = () => resolve(undefined);
+                        const buyFailed = (message, code) => {
+                            this.log.warn('Order failed: ' + JSON.stringify({ message, code }));
+                            resolve(amazonError(code !== null && code !== void 0 ? code : CdvPurchase.ErrorCode.UNKNOWN, message, offer.productId));
+                        };
+                        this.bridge.purchase(offer.productId, buySuccess, buyFailed);
+                    });
+                });
+            }
+            /**
+             * Prepare for receipt validation
+             */
+            receiptValidationBody(receipt) {
+                var _a;
+                return __awaiter(this, void 0, void 0, function* () {
+                    const transaction = receipt.transactions[0];
+                    if (!transaction)
+                        return;
+                    const productId = (_a = transaction.products[0]) === null || _a === void 0 ? void 0 : _a.id;
+                    if (!productId)
+                        return;
+                    const product = this._products.find(p => p.id === productId);
+                    if (!product)
+                        return;
+                    const purchase = transaction.nativePurchase;
+                    return {
+                        id: productId,
+                        type: product.type,
+                        offers: product.offers,
+                        products: this._products,
+                        transaction: {
+                            type: CdvPurchase.Platform.AMAZON_APPSTORE,
+                            id: receipt.transactions[0].transactionId,
+                            receiptId: purchase.receiptId,
+                            userId: purchase.userId,
+                        }
+                    };
+                });
+            }
+            handleReceiptValidationResponse(_receipt, _response) {
+                return __awaiter(this, void 0, void 0, function* () {
+                    return; // Nothing specific to do on Amazon
+                });
+            }
+            requestPayment(_payment, _additionalData) {
+                return __awaiter(this, void 0, void 0, function* () {
+                    return amazonError(CdvPurchase.ErrorCode.UNKNOWN, 'requestPayment not supported on Amazon', null);
+                });
+            }
+            manageSubscriptions() {
+                return __awaiter(this, void 0, void 0, function* () {
+                    return amazonError(CdvPurchase.ErrorCode.UNKNOWN, 'manageSubscriptions not available on Amazon', null);
+                });
+            }
+            manageBilling() {
+                return __awaiter(this, void 0, void 0, function* () {
+                    return amazonError(CdvPurchase.ErrorCode.UNKNOWN, 'manageBilling not available on Amazon', null);
+                });
+            }
+            checkSupport(functionality) {
+                const supported = ['order'];
+                return supported.indexOf(functionality) >= 0;
+            }
+            restorePurchases() {
+                return this.getPurchaseUpdates();
+            }
+        }
+        AmazonAppStore.Adapter = Adapter;
+        function amazonError(code, message, productId) {
+            return CdvPurchase.storeError(code, message, CdvPurchase.Platform.AMAZON_APPSTORE, productId);
+        }
+    })(AmazonAppStore = CdvPurchase.AmazonAppStore || (CdvPurchase.AmazonAppStore = {}));
+})(CdvPurchase || (CdvPurchase = {}));
+var CdvPurchase;
+(function (CdvPurchase) {
+    let AmazonAppStore;
+    (function (AmazonAppStore) {
+        let Bridge;
+        (function (Bridge_1) {
+            let log = function log(msg) {
+                console.log("AmazonIAP[js]: " + msg);
+            };
+            class Bridge {
+                constructor() {
+                    this.options = {};
+                }
+                init(success, fail, options) {
+                    if (!options)
+                        options = {};
+                    if (options.log)
+                        log = options.log;
+                    this.options = {
+                        showLog: options.showLog !== false,
+                        onPurchasesUpdated: options.onPurchasesUpdated,
+                        onSetPurchases: options.onSetPurchases,
+                        onPurchaseFulfilled: options.onPurchaseFulfilled,
+                    };
+                    if (this.options.showLog) {
+                        log('setup ok');
+                    }
+                    const listener = this.listener.bind(this);
+                    window.cordova.exec(listener, function () { }, "AmazonInAppPurchasePlugin", "setListener", []);
+                    window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "init", []);
+                }
+                listener(msg) {
+                    if (this.options.showLog) {
+                        log('listener: ' + JSON.stringify(msg));
+                    }
+                    if (!msg || !msg.type) {
+                        return;
+                    }
+                    if (msg.type === "setPurchases" && this.options.onSetPurchases) {
+                        this.options.onSetPurchases(msg.data.purchases);
+                    }
+                    if (msg.type === "purchasesUpdated" && this.options.onPurchasesUpdated) {
+                        this.options.onPurchasesUpdated(msg.data.purchases);
+                    }
+                    if (msg.type === "purchaseFulfilled" && this.options.onPurchaseFulfilled) {
+                        this.options.onPurchaseFulfilled(msg.data.purchase);
+                    }
+                }
+                getProductData(skus, success, fail) {
+                    if (this.options.showLog) {
+                        log('getProductData()');
+                    }
+                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "getProductData", [skus]);
+                }
+                purchase(productId, success, fail) {
+                    if (this.options.showLog) {
+                        log('purchase()');
+                    }
+                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "purchase", [productId]);
+                }
+                notifyFulfillment(receiptId, success, fail) {
+                    if (this.options.showLog) {
+                        log('notifyFulfillment()');
+                    }
+                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "notifyFulfillment", [receiptId]);
+                }
+                getPurchaseUpdates(success, fail) {
+                    if (this.options.showLog) {
+                        log('getPurchaseUpdates()');
+                    }
+                    return window.cordova.exec(success, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);
+                }
+            }
+            Bridge_1.Bridge = Bridge;
+            function errorCb(fail) {
+                return function (error) {
+                    if (!fail)
+                        return;
+                    const tokens = typeof error === 'string' ? error.split('|') : [];
+                    if (tokens.length > 1 && /^[-+]?(\d+)$/.test(tokens[0])) {
+                        var code = tokens[0];
+                        var message = tokens[1];
+                        fail(message, +code);
+                    }
+                    else {
+                        fail(error);
+                    }
+                };
+            }
+        })(Bridge = AmazonAppStore.Bridge || (AmazonAppStore.Bridge = {}));
+    })(AmazonAppStore = CdvPurchase.AmazonAppStore || (CdvPurchase.AmazonAppStore = {}));
+})(CdvPurchase || (CdvPurchase = {}));
 var CdvPurchase;
 (function (CdvPurchase) {
     /**
@@ -3375,7 +3782,7 @@ var CdvPurchase;
     let AppleAppStore;
     (function (AppleAppStore) {
         let Bridge;
-        (function (Bridge_1) {
+        (function (Bridge_2) {
             /** No-operation function, used as a default for callbacks */
             const noop = (args) => { };
             /** Logger */
@@ -3422,7 +3829,7 @@ var CdvPurchase;
                         transactionDate: string;
                         discountId: string;
                     }[] = [];
-
+    
                     private timer: number | null = null;
                     */
                     /** List of transaction updates to process */
@@ -3755,7 +4162,7 @@ var CdvPurchase;
                     exec('appStoreReceipt', [], loaded, error);
                 }
             }
-            Bridge_1.Bridge = Bridge;
+            Bridge_2.Bridge = Bridge;
         })(Bridge = AppleAppStore.Bridge || (AppleAppStore.Bridge = {}));
     })(AppleAppStore = CdvPurchase.AppleAppStore || (CdvPurchase.AppleAppStore = {}));
 })(CdvPurchase || (CdvPurchase = {}));
@@ -5328,7 +5735,7 @@ var CdvPurchase;
             ReplacementMode["CHARGE_FULL_PRICE"] = "IMMEDIATE_AND_CHARGE_FULL_PRICE";
         })(ReplacementMode = GooglePlay.ReplacementMode || (GooglePlay.ReplacementMode = {}));
         let Bridge;
-        (function (Bridge_2) {
+        (function (Bridge_3) {
             let log = function log(msg) {
                 console.log("InAppBilling[js]: " + msg);
             };
@@ -5337,7 +5744,7 @@ var CdvPurchase;
                 PurchaseState[PurchaseState["UNSPECIFIED_STATE"] = 0] = "UNSPECIFIED_STATE";
                 PurchaseState[PurchaseState["PURCHASED"] = 1] = "PURCHASED";
                 PurchaseState[PurchaseState["PENDING"] = 2] = "PENDING";
-            })(PurchaseState = Bridge_2.PurchaseState || (Bridge_2.PurchaseState = {}));
+            })(PurchaseState = Bridge_3.PurchaseState || (Bridge_3.PurchaseState = {}));
             class Bridge {
                 constructor() {
                     this.options = {};
@@ -5467,7 +5874,7 @@ var CdvPurchase;
                     return window.cordova.exec(function () { }, function () { }, "InAppBillingPlugin", "launchPriceChangeConfirmationFlow", [productId]);
                 }
             }
-            Bridge_2.Bridge = Bridge;
+            Bridge_3.Bridge = Bridge;
             // Generates a `fail` function that accepts an optional error code
             // in the first part of the error string.
             //

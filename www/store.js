@@ -2853,6 +2853,17 @@ var CdvPurchase;
                             this.log.debug("Ready");
                             this.initialized = true;
                             this.ready = true;
+                            // When the app resumes from background (e.g. after
+                            // the Amazon purchase overlay closes), refresh
+                            // purchases.  The Cordova 'resume' event fires once
+                            // the WebView is guaranteed to be active, so listener
+                            // messages sent from Java will reach JavaScript.
+                            document.addEventListener('resume', () => {
+                                if (this.initialized) {
+                                    this.log.debug('resume — refreshing purchases');
+                                    this.bridge.getPurchaseUpdates(() => { }, () => { });
+                                }
+                            }, false);
                             resolve(undefined);
                         };
                         const iabError = (err) => {

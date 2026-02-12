@@ -8,19 +8,19 @@
  *   Play adapter.  Per-request callbacks (purchase, getPurchaseUpdates)
  *   signal success/failure only and never carry purchase data.
  *
- *   This avoids race conditions between per-request callbacks and the
- *   PurchasingListener, which is invoked on arbitrary threads by the
- *   Amazon SDK.  The listener uses setKeepCallback(true) so it remains
- *   active for the lifetime of the plugin.
+ *   The listener uses setKeepCallback(true) so it remains active for
+ *   the lifetime of the plugin.
  *
- *   On resume the plugin calls getPurchaseUpdates(false) so that any
- *   purchases completed while the app was backgrounded (e.g. during
- *   the Amazon purchase overlay) are delivered reliably through the
- *   listener.
+ *   On resume the plugin delays 500ms before calling
+ *   getPurchaseUpdates(false) so the WebView has time to process any
+ *   queued messages and the JavaScript bridge is ready to receive
+ *   listener events.
  */
 
 package cc.fovea;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
@@ -43,6 +43,7 @@ import com.amazon.device.iap.model.Receipt;
 import com.amazon.device.iap.model.UserData;
 import com.amazon.device.iap.model.UserDataResponse;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,9 @@ public final class AmazonPurchasePlugin
         implements PurchasingListener {
 
     private static final String TAG = "CdvPurchase/Amazon";
+
+    /** Delay (ms) before refreshing purchases on resume. */
+    private static final long RESUME_DELAY_MS = 500;
 
     // ---- Callback contexts ------------------------------------------------
 
@@ -77,6 +81,12 @@ public final class AmazonPurchasePlugin
     /** Whether the SDK has been initialized. */
     private volatile boolean mInitialized = false;
 
+    /** Pending purchases received while the listener may not be ready. */
+    private final List<JSONObject> mPendingPurchases = new ArrayList<>();
+
+    /** Handler for posting delayed work on the main thread. */
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+
     // ---- Cordova lifecycle ------------------------------------------------
 
     @Override
@@ -86,16 +96,21 @@ public final class AmazonPurchasePlugin
     }
 
     /**
-     * When the activity resumes, poll for purchase updates so that any
-     * purchases completed while the app was backgrounded are delivered
-     * through the listener.
+     * When the activity resumes, flush any pending purchases that were
+     * received while the WebView was paused, then poll for purchase
+     * updates after a short delay so the WebView has time to resume
+     * and process queued messages.
      */
     @Override
     public void onResume(boolean multitasking) {
         super.onResume(multitasking);
         if (mInitialized) {
-            Log.d(TAG, "onResume — calling getPurchaseUpdates(false)");
-            PurchasingService.getPurchaseUpdates(false);
+            Log.d(TAG, "onResume — scheduling getPurchaseUpdates in " + RESUME_DELAY_MS + "ms");
+            mHandler.postDelayed(() -> {
+                Log.d(TAG, "onResume — flushing pending + calling getPurchaseUpdates(false)");
+                flushPendingPurchases();
+                PurchasingService.getPurchaseUpdates(false);
+            }, RESUME_DELAY_MS);
         }
     }
 
@@ -110,6 +125,8 @@ public final class AmazonPurchasePlugin
             case "setListener":
                 mListenerContext = callbackContext;
                 keepCallback(callbackContext);
+                // Flush any purchases that arrived before the listener was set.
+                flushPendingPurchases();
                 return true;
 
             case "init":
@@ -206,7 +223,9 @@ public final class AmazonPurchasePlugin
     public void onProductDataResponse(final ProductDataResponse response) {
         Log.d(TAG, "onProductDataResponse: " + response.getRequestStatus());
         CallbackContext cb = mGetProductDataCallback;
-        if (cb == null) return;
+        if (cb == null) {
+            return;
+        }
 
         switch (response.getRequestStatus()) {
             case SUCCESSFUL:
@@ -256,9 +275,16 @@ public final class AmazonPurchasePlugin
             case SUCCESSFUL:
                 Receipt receipt = response.getReceipt();
                 try {
+                    JSONObject purchaseJson = receiptToJson(receipt);
                     JSONArray arr = new JSONArray();
-                    arr.put(receiptToJson(receipt));
-                    emitToListener("purchasesUpdated", arr);
+                    arr.put(purchaseJson);
+                    if (!emitToListener("purchasesUpdated", arr)) {
+                        // Listener not ready; queue the purchase for later delivery.
+                        synchronized (mPendingPurchases) {
+                            mPendingPurchases.add(purchaseJson);
+                        }
+                        Log.d(TAG, "Purchase queued (listener not ready)");
+                    }
                 } catch (JSONException e) {
                     Log.e(TAG, "Error creating purchase JSON: " + e.getMessage());
                 }
@@ -361,10 +387,14 @@ public final class AmazonPurchasePlugin
      *
      * @param type      "purchasesUpdated" or "setPurchases"
      * @param purchases JSON array of purchase objects
+     * @return true if the message was sent, false if the listener is not set
      */
-    private void emitToListener(final String type, final JSONArray purchases) {
+    private boolean emitToListener(final String type, final JSONArray purchases) {
         CallbackContext lc = mListenerContext;
-        if (lc == null) return;
+        if (lc == null) {
+            Log.w(TAG, "emitToListener(" + type + ") — listener not set, dropping");
+            return false;
+        }
         try {
             JSONObject msg = new JSONObject();
             msg.put("type", type);
@@ -374,9 +404,32 @@ public final class AmazonPurchasePlugin
             PluginResult pr = new PluginResult(PluginResult.Status.OK, msg);
             pr.setKeepCallback(true);
             lc.sendPluginResult(pr);
+            Log.d(TAG, "emitToListener(" + type + ") — sent " + purchases.length() + " items");
+            return true;
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting " + type + ": " + e.getMessage());
+            return false;
         }
+    }
+
+    /**
+     * Flush pending purchases that arrived before the listener was ready.
+     */
+    private void flushPendingPurchases() {
+        List<JSONObject> pending;
+        synchronized (mPendingPurchases) {
+            if (mPendingPurchases.isEmpty()) {
+                return;
+            }
+            pending = new ArrayList<>(mPendingPurchases);
+            mPendingPurchases.clear();
+        }
+        Log.d(TAG, "Flushing " + pending.size() + " pending purchase(s)");
+        JSONArray arr = new JSONArray();
+        for (JSONObject p : pending) {
+            arr.put(p);
+        }
+        emitToListener("purchasesUpdated", arr);
     }
 
     /** Keep the callback context alive (for setListener). */

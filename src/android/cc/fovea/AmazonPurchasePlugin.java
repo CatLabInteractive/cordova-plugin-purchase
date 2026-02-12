@@ -188,7 +188,9 @@ public final class AmazonPurchasePlugin
                 PurchasingService.purchase(productId);
                 // Start polling for purchase results in case the
                 // broadcast / listener events are not delivered
-                // (common on Fire TV).
+                // (common on Fire TV).  Remove any existing poll
+                // first to avoid duplicate schedules.
+                mHandler.removeCallbacks(mPollRunnable);
                 mHandler.postDelayed(mPollRunnable, POLL_INTERVAL_MS);
                 return true;
             }

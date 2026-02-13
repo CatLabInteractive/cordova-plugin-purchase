@@ -68,6 +68,12 @@ public final class AmazonPurchasePlugin
     /** Interval (ms) for polling purchase updates while a purchase is in flight. */
     private static final long POLL_INTERVAL_MS = 3000;
 
+    /** Number of flush attempts after a purchase completes. */
+    private static final int POST_PURCHASE_FLUSH_COUNT = 5;
+
+    /** Interval (ms) between post-purchase flush attempts. */
+    private static final long POST_PURCHASE_FLUSH_INTERVAL_MS = 1000;
+
     // ---- Callback contexts ------------------------------------------------
 
     /** Persistent listener – receives all purchase data. */
@@ -100,6 +106,9 @@ public final class AmazonPurchasePlugin
     /** Handler for posting delayed work on the main thread. */
     private final Handler mHandler = new Handler(Looper.getMainLooper());
 
+    /** Remaining post-purchase flush attempts. */
+    private volatile int mPostPurchaseFlushRemaining = 0;
+
     /** Runnable for periodic purchase polling. */
     private final Runnable mPollRunnable = new Runnable() {
         @Override
@@ -107,11 +116,28 @@ public final class AmazonPurchasePlugin
             if (mInitialized) {
                 Log.d(TAG, "poll — calling getPurchaseUpdates(false)");
                 flushPendingPurchases();
-                PurchasingService.getPurchaseUpdates(false);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.getPurchaseUpdates(false));
             }
             // Re-schedule as long as a purchase is still in flight
             if (mPurchaseInFlight) {
                 mHandler.postDelayed(this, POLL_INTERVAL_MS);
+            }
+        }
+    };
+
+    /**
+     * Runnable that repeatedly flushes pending purchases after a purchase
+     * completes, ensuring the data reaches JavaScript even if the WebView
+     * was paused when the purchase response arrived.
+     */
+    private final Runnable mPostPurchaseFlushRunnable = new Runnable() {
+        @Override
+        public void run() {
+            flushPendingPurchases();
+            mPostPurchaseFlushRemaining--;
+            if (mPostPurchaseFlushRemaining > 0) {
+                mHandler.postDelayed(this, POST_PURCHASE_FLUSH_INTERVAL_MS);
             }
         }
     };
@@ -128,7 +154,9 @@ public final class AmazonPurchasePlugin
     public void onDestroy() {
         super.onDestroy();
         mPurchaseInFlight = false;
+        mPostPurchaseFlushRemaining = 0;
         mHandler.removeCallbacks(mPollRunnable);
+        mHandler.removeCallbacks(mPostPurchaseFlushRunnable);
     }
 
     /**
@@ -145,7 +173,8 @@ public final class AmazonPurchasePlugin
             mHandler.postDelayed(() -> {
                 Log.d(TAG, "onResume — flushing pending + calling getPurchaseUpdates(false)");
                 flushPendingPurchases();
-                PurchasingService.getPurchaseUpdates(false);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.getPurchaseUpdates(false));
             }, RESUME_DELAY_MS);
         }
     }
@@ -172,20 +201,22 @@ public final class AmazonPurchasePlugin
 
             case "getProductData": {
                 mGetProductDataCallback = callbackContext;
-                JSONArray skusArray = args.getJSONArray(0);
-                Set<String> skus = new HashSet<>();
+                final JSONArray skusArray = args.getJSONArray(0);
+                final Set<String> skus = new HashSet<>();
                 for (int i = 0; i < skusArray.length(); i++) {
                     skus.add(skusArray.getString(i));
                 }
-                PurchasingService.getProductData(skus);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.getProductData(skus));
                 return true;
             }
 
             case "purchase": {
                 mPurchaseCallback = callbackContext;
                 mPurchaseInFlight = true;
-                String productId = args.getString(0);
-                PurchasingService.purchase(productId);
+                final String productId = args.getString(0);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.purchase(productId));
                 // Start polling for purchase results in case the
                 // broadcast / listener events are not delivered
                 // (common on Fire TV).  Remove any existing poll
@@ -196,15 +227,17 @@ public final class AmazonPurchasePlugin
             }
 
             case "notifyFulfillment": {
-                String receiptId = args.getString(0);
-                PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED);
+                final String receiptId = args.getString(0);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED));
                 callbackContext.success();
                 return true;
             }
 
             case "getPurchaseUpdates":
                 mGetPurchaseUpdatesCallback = callbackContext;
-                PurchasingService.getPurchaseUpdates(false);
+                cordova.getActivity().runOnUiThread(() ->
+                    PurchasingService.getPurchaseUpdates(false));
                 return true;
 
             default:
@@ -332,6 +365,11 @@ public final class AmazonPurchasePlugin
                         }
                         Log.d(TAG, "Purchase queued (listener not ready)");
                     }
+                    // Schedule repeated flush attempts so queued purchases
+                    // reach the WebView once it resumes from the Amazon
+                    // purchase overlay, without requiring a full app
+                    // minimize/resume cycle.
+                    schedulePostPurchaseFlush();
                 } catch (JSONException e) {
                     Log.e(TAG, "Error creating purchase JSON: " + e.getMessage());
                 }
@@ -389,7 +427,8 @@ public final class AmazonPurchasePlugin
                     emitToListener("setPurchases", arr);
 
                     if (response.hasMore()) {
-                        PurchasingService.getPurchaseUpdates(false);
+                        cordova.getActivity().runOnUiThread(() ->
+                            PurchasingService.getPurchaseUpdates(false));
                     }
                 } catch (JSONException e) {
                     Log.e(TAG, "Error parsing purchase updates: " + e.getMessage());
@@ -476,7 +515,25 @@ public final class AmazonPurchasePlugin
         for (JSONObject p : pending) {
             arr.put(p);
         }
-        emitToListener("purchasesUpdated", arr);
+        if (!emitToListener("purchasesUpdated", arr)) {
+            // Listener still not ready; put them back.
+            synchronized (mPendingPurchases) {
+                for (JSONObject p : pending) {
+                    mPendingPurchases.add(p);
+                }
+            }
+        }
+    }
+
+    /**
+     * Schedule repeated flush attempts after a purchase completes.
+     * This ensures queued purchases reach JavaScript even if the
+     * WebView was paused when the purchase response arrived.
+     */
+    private void schedulePostPurchaseFlush() {
+        mHandler.removeCallbacks(mPostPurchaseFlushRunnable);
+        mPostPurchaseFlushRemaining = POST_PURCHASE_FLUSH_COUNT;
+        mHandler.postDelayed(mPostPurchaseFlushRunnable, POST_PURCHASE_FLUSH_INTERVAL_MS);
     }
 
     /** Keep the callback context alive (for setListener). */

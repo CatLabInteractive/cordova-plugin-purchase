@@ -18,15 +18,14 @@ The Cordova-Plugin-Purchase plugin is designed to be easy to use and integrate i
 
 ### Features
 
-|  | AppStore (iOS / macOS) | Google Play | Braintree (iOS / Android) |
-|--|--|--|--|
-| consumables | ✅ | ✅ | ✅ |
-| multi-quantity consumables |  | ✅ |  |
-| non consumables | ✅ | ✅ |  |
-| subscriptions | ✅ | ✅ |  |
-| restore purchases | ✅ | ✅ | ✅ |
-| payment requests |   |   | ✅ |
-| [receipt validation](https://www.iaptic.com) | ✅ | ✅ | ✅ |
+|  | AppStore (iOS / macOS) | Google Play | Amazon AppStore | Braintree (iOS / Android) |
+|--|--|--|--|--|
+| consumables | ✅ | ✅ | ✅ | ✅ |
+| non consumables | ✅ | ✅ | ✅ |  |
+| subscriptions | ✅ | ✅ | ✅ |  |
+| restore purchases | ✅ | ✅ | ✅ | ✅ |
+| payment requests |   |   |   | ✅ |
+| [receipt validation](https://www.iaptic.com) | ✅ | ✅ | ✅ | ✅ |
 
 ## Installation
 

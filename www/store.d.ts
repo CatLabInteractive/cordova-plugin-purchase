@@ -1,4 +1,3 @@
-/// <reference path="../src/ts/platforms/iaptic-js/iaptic-js-types.d.ts" />
 declare namespace CdvPurchase {
     /**
      * Error codes
@@ -408,9 +407,8 @@ declare namespace CdvPurchase {
         interface WindowsStore {
             platform: Platform.WINDOWS_STORE;
         }
-        interface IapticJS {
-            platform: Platform.IAPTIC_JS;
-            options: IapticJS.AdapterOptions;
+        interface AmazonAppStore {
+            platform: Platform.AMAZON_APPSTORE;
         }
     }
     /**
@@ -418,7 +416,7 @@ declare namespace CdvPurchase {
      *
      * @see {@link Store.initialize}
      */
-    type PlatformWithOptions = PlatformOptions.Braintree | PlatformOptions.AppleAppStore | PlatformOptions.GooglePlay | PlatformOptions.Test | PlatformOptions.WindowsStore | PlatformOptions.IapticJS;
+    type PlatformWithOptions = PlatformOptions.Braintree | PlatformOptions.AppleAppStore | PlatformOptions.GooglePlay | PlatformOptions.Test | PlatformOptions.WindowsStore | PlatformOptions.AmazonAppStore;
     /** @internal */
     namespace Internal {
         interface AdapterListener {
@@ -447,39 +445,6 @@ declare namespace CdvPurchase {
          * The list of active platform adapters
          */
         class Adapters {
-            /**
-             * Registry of adapter factories for dynamic adapter registration.
-             *
-             * This allows third-party adapters to be registered without modifying the core library.
-             */
-            private static adapterFactories;
-            /**
-             * Register a custom adapter factory for a platform.
-             *
-             * Use this to add support for platforms not built into the library.
-             *
-             * @param platform - The platform identifier
-             * @param factory - A function that creates an Adapter instance
-             *
-             * @example
-             * ```typescript
-             * CdvPurchase.Internal.Adapters.registerAdapter(
-             *     'my-custom-platform' as CdvPurchase.Platform,
-             *     (context, options) => new MyCustomAdapter(context, options)
-             * );
-             * ```
-             */
-            static registerAdapter(platform: Platform, factory: (context: AdapterContext, options: object) => Adapter): void;
-            /**
-             * Check if a custom adapter factory is registered for a platform.
-             */
-            static hasAdapterFactory(platform: Platform): boolean;
-            /**
-             * Create an adapter instance using a registered factory.
-             *
-             * @returns The adapter instance, or undefined if no factory is registered.
-             */
-            private static createAdapter;
             /**
              * List of instantiated adapters.
              *
@@ -657,7 +622,7 @@ declare namespace CdvPurchase {
         class RegisteredProducts {
             list: IRegisterProduct[];
             find(platform: Platform, id: string): IRegisterProduct | undefined;
-            add(product: IRegisterProduct | Test.IRegisterTestProduct | (IRegisterProduct | Test.IRegisterTestProduct)[]): IError[];
+            add(product: IRegisterProduct | IRegisterProduct[]): IError[];
             byPlatform(): {
                 platform: Platform;
                 products: IRegisterProduct[];
@@ -732,11 +697,8 @@ declare namespace CdvPurchase {
         /** Data and callbacks to interface with the ExpiryMonitor */
         interface ExpiryMonitorController {
             verifiedReceipts: VerifiedReceipt[];
-            localReceipts: Receipt[];
             /** Called when a verified purchase expires */
             onVerifiedPurchaseExpired(verifiedPurchase: VerifiedPurchase, receipt: VerifiedReceipt): void;
-            /** Called when a transaction expires */
-            onTransactionExpired(transaction: Transaction): void;
         }
         /**
          * Send a notification when a subscription expires.
@@ -761,8 +723,6 @@ declare namespace CdvPurchase {
             controller: ExpiryMonitorController;
             /** reference to the function that runs at a given interval */
             interval?: number;
-            /** Logger */
-            log: Logger;
             /** Track active verified purchases */
             activePurchases: {
                 [transactionId: string]: true;
@@ -772,15 +732,8 @@ declare namespace CdvPurchase {
                 [transactionId: string]: true;
             };
             /** Track active local transactions */
-            activeTransactions: {
-                [transactionId: string]: true;
-            };
             /** Track notified local transactions */
-            notifiedTransactions: {
-                [transactionId: string]: true;
-            };
-            constructor(controller: ExpiryMonitorController, log: Logger);
-            stop(): void;
+            constructor(controller: ExpiryMonitorController);
             launch(): void;
         }
     }
@@ -794,30 +747,17 @@ declare namespace CdvPurchase {
  *
  * When you see, for example `ProductType.PAID_SUBSCRIPTION`, it refers to `CdvPurchase.ProductType.PAID_SUBSCRIPTION`.
  *
- * In your code, you should access members directly through the CdvPurchase namespace:
+ * In the files that interact with the plugin, I recommend creating those shortcuts (and more if needed):
  *
  * ```ts
- * // Recommended approach (works reliably with minification)
- * CdvPurchase.store.initialize();
- * CdvPurchase.store.register({
- *   id: 'my-product',
- *   type: CdvPurchase.ProductType.PAID_SUBSCRIPTION,
- *   platform: CdvPurchase.Platform.APPLE_APPSTORE
- * });
- * ```
- *
- * Note: Using destructuring with the namespace may cause issues with minification tools:
- *
- * ```ts
- * // NOT recommended - may cause issues with minification tools like Terser
- * const { store, ProductType, Platform, LogLevel } = CdvPurchase;
+ * const {store, ProductType, Platform, LogLevel} = CdvPurchase;
  * ```
  */
 declare namespace CdvPurchase {
     /**
      * Current release number of the plugin.
      */
-    const PLUGIN_VERSION = "13.13.0";
+    const PLUGIN_VERSION = "13.12.1";
     /**
      * Entry class of the plugin.
      */
@@ -959,22 +899,8 @@ declare namespace CdvPurchase {
          *       type: ProductType.CONSUMABLE,
          *       platform: Platform.BRAINTREE,
          *   }]);
-         *
-         * // Can also be used in development to register test products
-         * store.register([{
-         *   id: 'my-custom-product',
-         *   type: CdvPurchase.ProductType.CONSUMABLE,
-         *   platform: CdvPurchase.Platform.TEST,
-         *   title: '...',
-         *   description: 'A custom test consumable product',
-         *   pricing: {
-         *     price: '$2.99',
-         *     currency: 'USD',
-         *     priceMicros: 2990000
-         *   }
-         * }]);
          */
-        register(product: IRegisterProduct | Test.IRegisterTestProduct | (IRegisterProduct | Test.IRegisterTestProduct)[]): void;
+        register(product: IRegisterProduct | IRegisterProduct[]): void;
         private initializedHasBeenCalled;
         /**
          * Call to initialize the in-app purchase plugin.
@@ -1135,9 +1061,6 @@ declare namespace CdvPurchase {
          * Finalize a transaction.
          *
          * This will be called from the Receipt, Transaction or VerifiedReceipt objects using the API decorators.
-         *
-         * If the transaction has already been consumed or acknowledged according to the verification API,
-         * the native platform's finish method will be skipped to avoid errors.
          */
         private finish;
         /**
@@ -1316,13 +1239,6 @@ declare namespace CdvPurchase {
          */
         isSupported: boolean;
         /**
-         * Returns true if the adapter can skip the native finish method for a transaction.
-         *
-         * Some platforms (e.g. Apple AppStore) require explicit acknowledgement of a purchase so it can be removed from
-         * the queue of pending transactions, regardless of whether the transaction is acknowledged or consumed already.
-         */
-        canSkipFinish?: boolean;
-        /**
          * Initializes a platform adapter.
          *
          * Will resolve when initialization is complete.
@@ -1416,8 +1332,8 @@ declare namespace CdvPurchase {
         BRAINTREE = "braintree",
         /** Test platform */
         TEST = "test",
-        /** Iaptic.js */
-        IAPTIC_JS = "iaptic-js"
+        /** Amazon AppStore */
+        AMAZON_APPSTORE = "amazon-appstore"
     }
     /**
      * Functionality optionality provided by a given platform.
@@ -1828,16 +1744,6 @@ declare namespace CdvPurchase {
         amountMicros?: number;
         /** Currency used to pay for the transaction, if known. */
         currency?: string;
-        /**
-         * Quantity of items purchased in a single transaction.
-         *
-         * For consumable products, this value represents the number of items purchased.
-         * For non-consumable products and subscriptions, this value is always 1.
-         *
-         * This is only supported on Android (Google Play) platform when using the multi-quantity purchase feature.
-         * On other platforms, the quantity is always 1.
-         */
-        quantity?: number;
         /** Purchased products */
         products: {
             /** Product identifier */
@@ -1977,6 +1883,176 @@ declare namespace CdvPurchase {
                 platform?: Platform;
             }): boolean;
             static getVerifiedPurchases(verifiedReceipts: VerifiedReceipt[]): VerifiedPurchase[];
+        }
+    }
+}
+declare namespace CdvPurchase {
+    namespace AmazonAppStore {
+        class Transaction extends CdvPurchase.Transaction {
+            nativePurchase: Bridge.AmazonPurchase;
+            constructor(purchase: Bridge.AmazonPurchase, parentReceipt: Receipt, decorator: Internal.TransactionDecorator);
+            static toState(purchase: Bridge.AmazonPurchase, fromConstructor: boolean): TransactionState;
+            /**
+             * Refresh the transaction based on the native purchase update
+             */
+            refresh(purchase: Bridge.AmazonPurchase, fromConstructor?: boolean): void;
+        }
+        class Receipt extends CdvPurchase.Receipt {
+            /** Amazon receipt ID */
+            receiptId: string;
+            /** @internal */
+            constructor(purchase: Bridge.AmazonPurchase, decorator: Internal.TransactionDecorator & Internal.ReceiptDecorator);
+            /** Refresh the content of the receipt based on the native purchase */
+            refreshPurchase(purchase: Bridge.AmazonPurchase): void;
+        }
+        class Adapter implements CdvPurchase.Adapter {
+            /** Adapter identifier */
+            id: Platform;
+            /** Adapter name */
+            name: string;
+            /** Has the adapter been successfully initialized */
+            ready: boolean;
+            supportsParallelLoading: boolean;
+            /** List of products managed by the adapter */
+            get products(): Product[];
+            private _products;
+            get receipts(): Receipt[];
+            private _receipts;
+            /** The Amazon bridge */
+            bridge: Bridge.Bridge;
+            /** Prevent double initialization */
+            initialized: boolean;
+            /** Used to retry failed commands */
+            retry: Internal.Retry<Function>;
+            private context;
+            private log;
+            static _instance: Adapter;
+            constructor(context: Internal.AdapterContext);
+            private initializationPromise?;
+            /** Returns true on Android, the platform supported by this adapter */
+            get isSupported(): boolean;
+            initialize(): Promise<undefined | IError>;
+            /** @inheritdoc */
+            loadReceipts(): Promise<CdvPurchase.Receipt[]>;
+            /** @inheritDoc */
+            loadProducts(products: IRegisterProduct[]): Promise<(Product | IError)[]>;
+            private addProduct;
+            /** @inheritDoc */
+            finish(transaction: CdvPurchase.Transaction): Promise<IError | undefined>;
+            /** Called by the bridge when a purchase has been fulfilled */
+            onPurchaseFulfilled(purchase: Bridge.AmazonPurchase): void;
+            /**
+             * Called when the platform reports initial purchases
+             */
+            onSetPurchases(purchases: Bridge.AmazonPurchase[]): void;
+            /**
+             * Called when the platform reports updates for some purchases
+             */
+            onPurchasesUpdated(purchases: Bridge.AmazonPurchase[]): void;
+            /** Refresh purchases from Amazon */
+            getPurchaseUpdates(): Promise<IError | undefined>;
+            /** @inheritDoc */
+            order(offer: Offer, additionalData: CdvPurchase.AdditionalData): Promise<IError | undefined>;
+            /**
+             * Prepare for receipt validation
+             */
+            receiptValidationBody(receipt: Receipt): Promise<Validator.Request.Body | undefined>;
+            handleReceiptValidationResponse(_receipt: CdvPurchase.Receipt, _response: Validator.Response.Payload): Promise<void>;
+            requestPayment(_payment: PaymentRequest, _additionalData?: CdvPurchase.AdditionalData): Promise<IError | Transaction | undefined>;
+            manageSubscriptions(): Promise<IError | undefined>;
+            manageBilling(): Promise<IError | undefined>;
+            checkSupport(functionality: PlatformFunctionality): boolean;
+            restorePurchases(): Promise<IError | undefined>;
+        }
+    }
+}
+declare namespace CdvPurchase {
+    namespace AmazonAppStore {
+        namespace Bridge {
+            class Bridge {
+                options: Options;
+                init(success: () => void, fail: ErrorCallback, options: Options): void;
+                listener(msg: Message): void;
+                getProductData(skus: string[], success: (products: ProductDataResponse) => void, fail: ErrorCallback): void;
+                purchase(productId: string, success: () => void, fail: ErrorCallback): void;
+                notifyFulfillment(receiptId: string, success: () => void, fail: ErrorCallback): void;
+                getPurchaseUpdates(success: () => void, fail: ErrorCallback): void;
+            }
+        }
+    }
+}
+declare namespace CdvPurchase {
+    namespace AmazonAppStore {
+        namespace Bridge {
+            /** Amazon product data */
+            interface AmazonProduct {
+                /** Product SKU */
+                productId: string;
+                /** Product title */
+                title: string;
+                /** Product description */
+                description: string;
+                /** Formatted price string (e.g., "$0.99") */
+                price?: string;
+                /** Price in micro-units */
+                priceMicros?: number;
+                /** Currency code */
+                currency?: string;
+                /** Product type: CONSUMABLE, ENTITLED, or SUBSCRIPTION */
+                productType: string;
+            }
+            /** Amazon purchase receipt */
+            interface AmazonPurchase {
+                /** Amazon receipt ID */
+                receiptId: string;
+                /** Product SKU */
+                productId: string;
+                /** Product type */
+                productType: string;
+                /** Purchase date (ms since epoch) */
+                purchaseDate: number;
+                /** Whether the purchase has been canceled */
+                canceled: boolean;
+                /** Amazon user ID */
+                userId?: string;
+                /** Amazon marketplace */
+                marketplace?: string;
+            }
+            /** Response from getProductData */
+            interface ProductDataResponse {
+                products: AmazonProduct[];
+                unavailableSkus: string[];
+            }
+            /** Response from purchase */
+            interface PurchaseResponse {
+                purchase: AmazonPurchase;
+                status: string;
+            }
+            /** Options for bridge initialization */
+            interface Options {
+                log?: (msg: string) => void;
+                showLog?: boolean;
+                onPurchasesUpdated?: (purchases: AmazonPurchase[]) => void;
+                onSetPurchases?: (purchases: AmazonPurchase[]) => void;
+                onPurchaseFulfilled?: (purchase: AmazonPurchase) => void;
+            }
+            type ErrorCallback = (message: string, code?: ErrorCode) => void;
+            type Message = {
+                type: "setPurchases";
+                data: {
+                    purchases: AmazonPurchase[];
+                };
+            } | {
+                type: "purchasesUpdated";
+                data: {
+                    purchases: AmazonPurchase[];
+                };
+            } | {
+                type: "purchaseFulfilled";
+                data: {
+                    purchase: AmazonPurchase;
+                };
+            };
         }
     }
 }
@@ -4291,7 +4367,6 @@ declare namespace CdvPurchase {
              * Refresh the value in the transaction based on the native purchase update
              */
             refresh(purchase: Bridge.Purchase, fromConstructor?: boolean): void;
-            removed(): void;
         }
         class Receipt extends CdvPurchase.Receipt {
             /** Token that uniquely identifies a purchase for a given item and user pair. */
@@ -4302,7 +4377,6 @@ declare namespace CdvPurchase {
             constructor(purchase: Bridge.Purchase, decorator: Internal.TransactionDecorator & Internal.ReceiptDecorator);
             /** Refresh the content of the purchase based on the native BridgePurchase */
             refreshPurchase(purchase: Bridge.Purchase): void;
-            removed(): void;
         }
         class Adapter implements CdvPurchase.Adapter {
             /** Adapter identifier */
@@ -4312,7 +4386,6 @@ declare namespace CdvPurchase {
             /** Has the adapter been successfully initialized */
             ready: boolean;
             supportsParallelLoading: boolean;
-            canSkipFinish: boolean;
             /** List of products managed by the GooglePlay adapter */
             get products(): GProduct[];
             private _products;
@@ -4347,29 +4420,10 @@ declare namespace CdvPurchase {
             finish(transaction: CdvPurchase.Transaction): Promise<IError | undefined>;
             /** Called by the bridge when a purchase has been consumed */
             onPurchaseConsumed(purchase: Bridge.Purchase): void;
-            /** Schedule to refresh purchases for subscriptions that don't have expiration dates */
-            private refreshSchedule;
-            /** Refresh intervals (in milliseconds) */
-            private static REFRESH_INTERVALS;
-            /**
-             * Schedule a purchase refresh for a subscription without expiration date
-             */
-            private scheduleRefreshForSubscription;
-            /**
-             * Detect subscriptions that need scheduled refreshes
-             */
-            private scheduleRefreshesForSubscriptions;
-            /**
-             * Called when the platform reports some purchases
-             */
-            onSetPurchases(purchases: Bridge.Purchase[]): void;
-            /**
-             * Called when the platform reports updates for some purchases
-             *
-             * Notice that purchases can be removed from the array, we should handle that so they stop
-             * being "owned" by the user.
-             */
+            /** Called when the platform reports update for some purchases */
             onPurchasesUpdated(purchases: Bridge.Purchase[]): void;
+            /** Called when the platform reports some purchases */
+            onSetPurchases(purchases: Bridge.Purchase[]): void;
             onPriceChangeConfirmationResult(result: "OK" | "UserCanceled" | "UnknownProduct"): void;
             /** Refresh purchases from GooglePlay */
             getPurchases(): Promise<IError | undefined>;
@@ -4434,19 +4488,6 @@ declare namespace CdvPurchase {
                 price_amount_micros: number;
                 price_currency_code: string;
             }
-            /** One-time purchase offer details (new in Billing Library 8.0.0) */
-            interface InAppOffer {
-                /** Offer id associated with this offer (may be null for default offer) */
-                offer_id: string | null;
-                /** Token required to pass in launchBillingFlow to purchase with this offer */
-                offer_token: string;
-                /** Formatted price for display */
-                formatted_price: string;
-                /** Price in micro-units (divide by 1000000 to get numeric price) */
-                price_amount_micros: number;
-                /** ISO 4217 currency code */
-                price_currency_code: string;
-            }
             interface InAppProduct {
                 product_format: "v12.0" | "v11.0";
                 product_type: "inapp";
@@ -4458,8 +4499,6 @@ declare namespace CdvPurchase {
                 formatted_price?: string;
                 price?: string;
                 price_amount_micros?: number;
-                /** Array of offers for this product (new in Billing Library 8.0.0, only present in v12.0 format) */
-                offers?: InAppOffer[];
             }
         }
     }
@@ -4563,14 +4602,7 @@ declare namespace CdvPurchase {
                 purchaseState: number;
                 /** Token that uniquely identifies a purchase for a given item and user pair. */
                 purchaseToken: string;
-                /** Quantity of items purchased in a single transaction.
-                 *
-                 * For consumable products, this value represents the number of items purchased.
-                 * For non-consumable products and subscriptions, this value is always 1.
-                 *
-                 * This is particularly useful for apps that support multi-quantity purchases
-                 * through Google Play Billing Library.
-                 */
+                /** quantity of the purchased product */
                 quantity: number;
                 /** Whether the purchase has been acknowledged. */
                 acknowledged: boolean;
@@ -4579,7 +4611,7 @@ declare namespace CdvPurchase {
                 /** One of BridgePurchaseState indicating the state of the purchase. */
                 getPurchaseState: PurchaseState;
                 /** Whether the subscription renews automatically. */
-                autoRenewing: boolean;
+                autoRenewing: false;
                 /** String containing the signature of the purchase data that was signed with the private key of the developer. */
                 signature: string;
                 /** String in JSON format that contains details about the purchase order. */
@@ -4588,8 +4620,6 @@ declare namespace CdvPurchase {
                 accountId: string;
                 /** Obfuscated profile id specified at purchase - used when a single user can have multiple profiles */
                 profileId: string;
-                /** For subscriptions, timestamp of expiration in milliseconds */
-                expiryTimeMillis?: string;
             }
             enum PurchaseState {
                 UNSPECIFIED_STATE = 0,
@@ -5184,65 +5214,6 @@ declare namespace CdvPurchase {
     }
 }
 declare namespace CdvPurchase {
-    namespace Utils {
-        /**
-         * Returns the MD5 hash-value of the passed string.
-         *
-         * Based on the work of Jeff Mott, who did a pure JS implementation of the MD5 algorithm that was published by Ronald L. Rivest in 1991.
-         * Code was imported from https://github.com/pvorb/node-md5
-         *
-         * I cleaned up the all-including minified version of it.
-         */
-        function md5(str: string): string;
-    }
-}
-declare namespace CdvPurchase {
-    namespace IapticJS {
-        type AdapterOptions = ModuleIapticJS.Config;
-        class Receipt extends CdvPurchase.Receipt {
-            purchases: ModuleIapticJS.Purchase[];
-            accessToken: string;
-            private context;
-            constructor(purchases: ModuleIapticJS.Purchase[], accessToken: string, context: Internal.AdapterContext);
-            refresh(purchases: ModuleIapticJS.Purchase[]): void;
-        }
-        class Transaction extends CdvPurchase.Transaction {
-            purchase: ModuleIapticJS.Purchase;
-            constructor(receipt: Receipt, purchase: ModuleIapticJS.Purchase, decorator: Internal.TransactionDecorator);
-            refresh(purchase: ModuleIapticJS.Purchase): void;
-        }
-        class Adapter implements CdvPurchase.Adapter {
-            id: Platform;
-            name: string;
-            ready: boolean;
-            products: CdvPurchase.Product[];
-            _receipts: Receipt[];
-            get receipts(): Receipt[];
-            private context;
-            private log;
-            private options;
-            private iapticAdapterInstance;
-            private backendAdapterType;
-            private upsertProduct;
-            constructor(context: Internal.AdapterContext, options: AdapterOptions);
-            get isSupported(): boolean;
-            supportsParallelLoading: boolean;
-            initialize(): Promise<IError | undefined>;
-            loadProducts(products: IRegisterProduct[]): Promise<(CdvPurchase.Product | IError)[]>;
-            loadReceipts(): Promise<Receipt[]>;
-            order(offer: CdvPurchase.Offer, additionalData: CdvPurchase.AdditionalData): Promise<undefined | IError>;
-            finish(transaction: Transaction): Promise<undefined | IError>;
-            receiptValidationBody(receipt: Receipt): Promise<Validator.Request.Body | undefined>;
-            handleReceiptValidationResponse(receipt: Receipt, response: Validator.Response.Payload): Promise<void>;
-            requestPayment(payment: PaymentRequest, additionalData?: CdvPurchase.AdditionalData): Promise<IError | Transaction | undefined>;
-            manageSubscriptions(): Promise<IError | undefined>;
-            manageBilling(): Promise<IError | undefined>;
-            checkSupport(functionality: PlatformFunctionality): boolean;
-            restorePurchases(): Promise<IError | undefined>;
-        }
-    }
-}
-declare namespace CdvPurchase {
     /**
      * Test Adapter and related classes.
      */
@@ -5314,31 +5285,7 @@ declare namespace CdvPurchase {
 declare namespace CdvPurchase {
     namespace Test {
         /**
-         * Metadata for test products.
-         */
-        interface TestProductMetadata {
-            title: string;
-            description: string;
-            offerId: string;
-            pricing: {
-                price: string;
-                currency: string;
-                priceMicros: number;
-            } | PricingPhase[];
-        }
-        type IRegisterTestProduct = IRegisterProduct & Partial<TestProductMetadata>;
-        /**
-         * Storage for custom test products registered by the user.
-         *
-         * @internal
-         */
-        const customTestProducts: {
-            [key: string]: IRegisterProduct & {
-                customMetadata?: TestProductMetadata;
-            };
-        };
-        /**
-         * Definition of the built-in test products.
+         * Definition of the test products.
          */
         const testProducts: {
             /**
@@ -5410,56 +5357,6 @@ declare namespace CdvPurchase {
          * List of test products definitions as an array.
          */
         const testProductsArray: IRegisterProduct[];
-        /**
-         * Register a custom test product that can be used during development.
-         *
-         * This function allows developers to create custom test products for development
-         * and testing purposes. These products will be available in the Test platform
-         * alongside the standard test products.
-         *
-         * @param config - Configuration for the test product
-         * @returns The registered product configuration
-         *
-         * @example
-         * ```typescript
-         * // Register a custom consumable product
-         * CdvPurchase.Test.registerTestProduct({
-         *   id: 'my-consumable',
-         *   type: CdvPurchase.ProductType.CONSUMABLE,
-         *   title: 'My Custom Consumable',
-         *   description: 'A custom test consumable product',
-         *   pricing: {
-         *     price: '$2.99',
-         *     currency: 'USD',
-         *     priceMicros: 2990000
-         *   }
-         * });
-         *
-         * // Later register it with the store
-         * store.register([{
-         *   id: 'my-consumable',
-         *   type: CdvPurchase.ProductType.CONSUMABLE,
-         *   platform: CdvPurchase.Platform.TEST
-         * }]);
-         *
-         * // Note that this can be done in a single step:
-         * store.register([{
-         *   id: 'my-custom-product',
-         *   type: CdvPurchase.ProductType.CONSUMABLE,
-         *   platform: CdvPurchase.Platform.TEST,
-         *   title: '...',
-         *   description: 'A custom test consumable product',
-         *   pricing: {
-         *     price: '$2.99',
-         *     currency: 'USD',
-         *     priceMicros: 2990000
-         *   }
-         * }]);
-         * ```
-         */
-        function registerTestProduct(config: IRegisterTestProduct): IRegisterProduct & {
-            customMetadata?: TestProductMetadata;
-        };
         /**
          * Initialize a test product.
          *
@@ -5696,6 +5593,19 @@ declare namespace CdvPurchase {
 }
 declare namespace CdvPurchase {
     namespace Utils {
+        /**
+         * Returns the MD5 hash-value of the passed string.
+         *
+         * Based on the work of Jeff Mott, who did a pure JS implementation of the MD5 algorithm that was published by Ronald L. Rivest in 1991.
+         * Code was imported from https://github.com/pvorb/node-md5
+         *
+         * I cleaned up the all-including minified version of it.
+         */
+        function md5(str: string): string;
+    }
+}
+declare namespace CdvPurchase {
+    namespace Utils {
         type PlatformID = 'ios' | 'android' | 'web';
         /** Returns an UUID v4. Uses `window.crypto` internally to generate random values. */
         function platformId(): PlatformID;
@@ -5865,14 +5775,7 @@ declare namespace CdvPurchase {
                     }[];
                 }[];
             }
-            type ApiValidatorBodyTransaction = ApiValidatorBodyTransactionApple | ApiValidatorBodyTransactionGoogle | ApiValidatorBodyTransactionWindows | ApiValidatorBodyTransactionBraintree | ApiValidatorBodyTransactionIaptic;
-            interface ApiValidatorBodyTransactionIaptic {
-                type: 'iaptic';
-                /** The backend adapter type (e.g., 'stripe') */
-                adapter: 'stripe';
-                /** The access token */
-                accessToken?: string;
-            }
+            type ApiValidatorBodyTransaction = ApiValidatorBodyTransactionApple | ApiValidatorBodyTransactionGoogle | ApiValidatorBodyTransactionWindows | ApiValidatorBodyTransactionBraintree | ApiValidatorBodyTransactionAmazon;
             /** Transaction type from an Apple powered device  */
             interface ApiValidatorBodyTransactionApple {
                 /** Value `"ios-appstore"` */
@@ -5954,6 +5857,17 @@ declare namespace CdvPurchase {
                 /** Data collected on the device */
                 deviceData: any;
             }
+            /** Transaction type from Amazon AppStore */
+            interface ApiValidatorBodyTransactionAmazon {
+                /** Value `"amazon-appstore"` */
+                type: Platform.AMAZON_APPSTORE;
+                /** Identifier of the transaction to evaluate. @required */
+                id?: string;
+                /** Amazon receipt ID. @required */
+                receiptId?: string;
+                /** Amazon user ID. @optional */
+                userId?: string;
+            }
             /** Describe a discount */
             interface DiscountDefinition {
                 /** Discount identifier */
@@ -6019,6 +5933,8 @@ declare namespace CdvPurchase {
             } & (AppleAppStore.VerifyReceipt.AppleTransaction | AppleAppStore.VerifyReceipt.AppleVerifyReceiptResponseReceipt)) | ({
                 type: 'android-playstore';
             } & GooglePlay.PublisherAPI.GooglePurchase) | ({
+                type: 'amazon-appstore';
+            }) | ({
                 type: 'test';
             });
             /** Error response from the validator endpoint */
@@ -6146,10 +6062,6 @@ declare namespace CdvPurchase {
         expiryDate?: number;
         /** True when a subscription is expired. */
         isExpired?: boolean;
-        /** True when a purchase has been acknowledged to the platform. */
-        isAcknowledged?: boolean;
-        /** True when a purchase has been consumed (for consumable products). */
-        isConsumed?: boolean;
         /** Renewal intent. */
         renewalIntent?: string;
         /** Date the renewal intent was updated by the user. */

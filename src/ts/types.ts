@@ -130,14 +130,6 @@ namespace CdvPurchase {
         isSupported: boolean;
 
         /**
-         * Returns true if the adapter can skip the native finish method for a transaction.
-         * 
-         * Some platforms (e.g. Apple AppStore) require explicit acknowledgement of a purchase so it can be removed from
-         * the queue of pending transactions, regardless of whether the transaction is acknowledged or consumed already.
-         */
-        canSkipFinish?: boolean;
-
-        /**
          * Initializes a platform adapter.
          *
          * Will resolve when initialization is complete.
@@ -248,7 +240,8 @@ namespace CdvPurchase {
         GOOGLE_PLAY = 'android-playstore',
 
         /** Windows Store */
-        WINDOWS_STORE = 'windows-store-transaction',
+        WINDOWS_STORE = 'windo' +
+			'ws-store-transaction',
 
         /** Braintree */
         BRAINTREE = 'braintree',
@@ -259,8 +252,8 @@ namespace CdvPurchase {
         /** Test platform */
         TEST = 'test',
 
-        /** Iaptic.js */
-        IAPTIC_JS = 'iaptic-js',
+        /** Amazon AppStore */
+        AMAZON_APPSTORE = 'amazon-appstore',
     }
 
     /**

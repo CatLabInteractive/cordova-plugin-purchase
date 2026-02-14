@@ -2835,6 +2835,9 @@ var CdvPurchase;
                         const newReceipt = new Receipt(purchase, this.context.apiDecorators);
                         this._receipts.push(newReceipt);
                         this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [newReceipt]);
+                        // The constructor sets state to INITIATED. If the purchase is not
+                        // pending, immediately transition to APPROVED so the store's
+                        // transaction monitor can process the full state change sequence.
                         if (newReceipt.transactions[0].state === CdvPurchase.TransactionState.INITIATED && !newReceipt.transactions[0].isPending) {
                             newReceipt.refreshPurchase(purchase);
                             this.context.listener.receiptsUpdated(CdvPurchase.Platform.AMAZON_APPSTORE, [newReceipt]);
@@ -3012,6 +3015,7 @@ var CdvPurchase;
                     }
                     // Purchase data arrives through the persistent listener,
                     // not through this callback.
+                    // A placeholder argument is required by the Cordova exec interface.
                     return window.cordova.exec(function () {
                         if (success)
                             success();

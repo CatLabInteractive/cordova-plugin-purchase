@@ -83,6 +83,7 @@ namespace CdvPurchase {
                     }
                     // Purchase data arrives through the persistent listener,
                     // not through this callback.
+                    // A placeholder argument is required by the Cordova exec interface.
                     return window.cordova.exec(function() {
                         if (success) success();
                     }, errorCb(fail), "AmazonInAppPurchasePlugin", "getPurchaseUpdates", ["null"]);

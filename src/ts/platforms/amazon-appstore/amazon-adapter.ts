@@ -281,6 +281,9 @@ namespace CdvPurchase {
                         const newReceipt = new Receipt(purchase, this.context.apiDecorators);
                         this._receipts.push(newReceipt);
                         this.context.listener.receiptsUpdated(Platform.AMAZON_APPSTORE, [newReceipt]);
+                        // The constructor sets state to INITIATED. If the purchase is not
+                        // pending, immediately transition to APPROVED so the store's
+                        // transaction monitor can process the full state change sequence.
                         if (newReceipt.transactions[0].state === TransactionState.INITIATED && !newReceipt.transactions[0].isPending) {
                             newReceipt.refreshPurchase(purchase);
                             this.context.listener.receiptsUpdated(Platform.AMAZON_APPSTORE, [newReceipt]);

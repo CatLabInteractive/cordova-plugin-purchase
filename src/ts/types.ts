@@ -250,6 +250,9 @@ namespace CdvPurchase {
 
         /** Test platform */
         TEST = 'test',
+
+        /** Amazon AppStore */
+        AMAZON_APPSTORE = 'amazon-appstore',
     }
 
     /**

@@ -17,6 +17,7 @@ namespace CdvPurchase
 
         export interface Test { platform: Platform.TEST; }
         export interface WindowsStore { platform: Platform.WINDOWS_STORE; }
+        export interface AmazonAppStore { platform: Platform.AMAZON_APPSTORE; }
     }
 
     /**
@@ -30,6 +31,7 @@ namespace CdvPurchase
         | PlatformOptions.GooglePlay
         | PlatformOptions.Test
         | PlatformOptions.WindowsStore
+        | PlatformOptions.AmazonAppStore
         ;
 
     /** @internal */
@@ -94,6 +96,8 @@ namespace CdvPurchase
                             return this.list.push(new Braintree.Adapter(context, po.options));
                         case Platform.TEST:
                             return this.list.push(new Test.Adapter(context));
+                        case Platform.AMAZON_APPSTORE:
+                            return this.list.push(new AmazonAppStore.Adapter(context));
                         default:
                             return;
                     }

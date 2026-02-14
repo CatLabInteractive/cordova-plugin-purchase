@@ -18,10 +18,15 @@
  *   Fire TV devices — the ResponseReceiver broadcast may be blocked
  *   by SELinux or never delivered.
  *
- *   On resume the plugin delays 500ms before calling
- *   getPurchaseUpdates(false) so the WebView has time to process any
- *   queued messages and the JavaScript bridge is ready to receive
- *   listener events.
+ *   After a successful purchase, the plugin enters a post-purchase
+ *   polling phase: getPurchaseUpdates(false) is called every 1 second
+ *   until either (a) a non-empty response confirms the receipt has
+ *   been delivered, (b) a new purchase is started, or (c) 2 minutes
+ *   have elapsed.  This avoids reliance on the Cordova 'resume' event
+ *   which may not fire on Amazon Fire TV.
+ *
+ *   On resume the plugin also calls getPurchaseUpdates(false) after
+ *   a short delay as an additional fallback.
  */
 
 package cc.fovea;
@@ -68,6 +73,12 @@ public final class AmazonPurchasePlugin
     /** Interval (ms) for polling purchase updates while a purchase is in flight. */
     private static final long POLL_INTERVAL_MS = 3000;
 
+    /** Interval (ms) for post-purchase polling (faster to quickly deliver the receipt). */
+    private static final long POST_PURCHASE_POLL_MS = 1000;
+
+    /** Timeout (ms) after which post-purchase polling stops (2 minutes). */
+    private static final long POST_PURCHASE_TIMEOUT_MS = 120_000;
+
     // ---- Callback contexts ------------------------------------------------
 
     /** Persistent listener – receives all purchase data. */
@@ -94,13 +105,24 @@ public final class AmazonPurchasePlugin
     /** Whether a purchase is currently in flight (waiting for result). */
     private volatile boolean mPurchaseInFlight = false;
 
+    /**
+     * Whether we are in the post-purchase polling phase.
+     * After onPurchaseResponse(SUCCESSFUL), we poll getPurchaseUpdates at
+     * short intervals until a non-empty response confirms the receipt has
+     * been delivered, or until we time out.
+     */
+    private volatile boolean mPostPurchasePolling = false;
+
+    /** Timestamp (ms) when post-purchase polling started, for timeout. */
+    private volatile long mPostPurchasePollStart = 0;
+
     /** Pending purchases received while the listener may not be ready. */
     private final List<JSONObject> mPendingPurchases = new ArrayList<>();
 
     /** Handler for posting delayed work on the main thread. */
     private final Handler mHandler = new Handler(Looper.getMainLooper());
 
-    /** Runnable for periodic purchase polling. */
+    /** Runnable for periodic purchase polling (while purchase dialog is open). */
     private final Runnable mPollRunnable = new Runnable() {
         @Override
         public void run() {
@@ -116,6 +138,31 @@ public final class AmazonPurchasePlugin
         }
     };
 
+    /**
+     * Runnable for post-purchase polling.
+     * After a successful purchase response, polls getPurchaseUpdates at
+     * 1-second intervals until the receipt is confirmed delivered or
+     * we time out after 2 minutes.
+     */
+    private final Runnable mPostPurchasePollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!mPostPurchasePolling || !mInitialized) {
+                return;
+            }
+            long elapsed = System.currentTimeMillis() - mPostPurchasePollStart;
+            if (elapsed > POST_PURCHASE_TIMEOUT_MS) {
+                Log.d(TAG, "post-purchase poll — timed out after " + elapsed + "ms");
+                mPostPurchasePolling = false;
+                return;
+            }
+            Log.d(TAG, "post-purchase poll — calling getPurchaseUpdates(false) (" + elapsed + "ms elapsed)");
+            flushPendingPurchases();
+            PurchasingService.getPurchaseUpdates(false);
+            mHandler.postDelayed(this, POST_PURCHASE_POLL_MS);
+        }
+    };
+
     // ---- Cordova lifecycle ------------------------------------------------
 
     @Override
@@ -128,7 +175,9 @@ public final class AmazonPurchasePlugin
     public void onDestroy() {
         super.onDestroy();
         mPurchaseInFlight = false;
+        mPostPurchasePolling = false;
         mHandler.removeCallbacks(mPollRunnable);
+        mHandler.removeCallbacks(mPostPurchasePollRunnable);
     }
 
     /**
@@ -186,6 +235,9 @@ public final class AmazonPurchasePlugin
             case "purchase": {
                 mPurchaseCallback = callbackContext;
                 mPurchaseInFlight = true;
+                // Stop any post-purchase polling from a previous purchase.
+                mPostPurchasePolling = false;
+                mHandler.removeCallbacks(mPostPurchasePollRunnable);
                 final String productId = args.getString(0);
                 // Amazon IAP SDK requires calls on the main thread;
                 // calling from a background thread can silently fail
@@ -350,16 +402,15 @@ public final class AmazonPurchasePlugin
                     cb.success();
                     mPurchaseCallback = null;
                 }
-                // Safety-net: schedule a delayed getPurchaseUpdates to re-deliver
-                // the purchase in case the listener message above was not processed
-                // (e.g. the WebView was still resuming from the purchase overlay).
-                mHandler.postDelayed(() -> {
-                    if (mInitialized) {
-                        Log.d(TAG, "post-purchase safety-net — getPurchaseUpdates(false)");
-                        flushPendingPurchases();
-                        PurchasingService.getPurchaseUpdates(false);
-                    }
-                }, RESUME_DELAY_MS);
+                // Start post-purchase polling: call getPurchaseUpdates at
+                // 1-second intervals until the receipt is confirmed delivered
+                // via onPurchaseUpdatesResponse, or until we time out.
+                // This replaces reliance on the 'resume' event which may not
+                // fire reliably on all Amazon devices (e.g. Fire TV).
+                mPostPurchasePolling = true;
+                mPostPurchasePollStart = System.currentTimeMillis();
+                mHandler.removeCallbacks(mPostPurchasePollRunnable);
+                mHandler.postDelayed(mPostPurchasePollRunnable, POST_PURCHASE_POLL_MS);
                 break;
             case FAILED:
                 if (cb != null) {
@@ -408,6 +459,14 @@ public final class AmazonPurchasePlugin
                         }
                     }
                     emitToListener("setPurchases", arr);
+
+                    // If we received receipts during post-purchase polling,
+                    // the purchase has been confirmed — stop polling.
+                    if (mPostPurchasePolling && arr.length() > 0) {
+                        Log.d(TAG, "post-purchase poll — receipts received, stopping");
+                        mPostPurchasePolling = false;
+                        mHandler.removeCallbacks(mPostPurchasePollRunnable);
+                    }
 
                     if (response.hasMore()) {
                         PurchasingService.getPurchaseUpdates(false);

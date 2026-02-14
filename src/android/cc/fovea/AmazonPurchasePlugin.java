@@ -172,39 +172,50 @@ public final class AmazonPurchasePlugin
 
             case "getProductData": {
                 mGetProductDataCallback = callbackContext;
-                JSONArray skusArray = args.getJSONArray(0);
-                Set<String> skus = new HashSet<>();
+                final JSONArray skusArray = args.getJSONArray(0);
+                final Set<String> skus = new HashSet<>();
                 for (int i = 0; i < skusArray.length(); i++) {
                     skus.add(skusArray.getString(i));
                 }
-                PurchasingService.getProductData(skus);
+                // Amazon IAP SDK requires calls on the main thread.
+                cordova.getActivity().runOnUiThread(() ->
+                        PurchasingService.getProductData(skus));
                 return true;
             }
 
             case "purchase": {
                 mPurchaseCallback = callbackContext;
                 mPurchaseInFlight = true;
-                String productId = args.getString(0);
-                PurchasingService.purchase(productId);
-                // Start polling for purchase results in case the
-                // broadcast / listener events are not delivered
-                // (common on Fire TV).  Remove any existing poll
-                // first to avoid duplicate schedules.
-                mHandler.removeCallbacks(mPollRunnable);
-                mHandler.postDelayed(mPollRunnable, POLL_INTERVAL_MS);
+                final String productId = args.getString(0);
+                // Amazon IAP SDK requires calls on the main thread;
+                // calling from a background thread can silently fail
+                // to show the purchase dialog.
+                cordova.getActivity().runOnUiThread(() -> {
+                    PurchasingService.purchase(productId);
+                    // Start polling for purchase results in case the
+                    // broadcast / listener events are not delivered
+                    // (common on Fire TV).  Remove any existing poll
+                    // first to avoid duplicate schedules.
+                    mHandler.removeCallbacks(mPollRunnable);
+                    mHandler.postDelayed(mPollRunnable, POLL_INTERVAL_MS);
+                });
                 return true;
             }
 
             case "notifyFulfillment": {
-                String receiptId = args.getString(0);
-                PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED);
+                final String receiptId = args.getString(0);
+                // Amazon IAP SDK requires calls on the main thread.
+                cordova.getActivity().runOnUiThread(() ->
+                        PurchasingService.notifyFulfillment(receiptId, FulfillmentResult.FULFILLED));
                 callbackContext.success();
                 return true;
             }
 
             case "getPurchaseUpdates":
                 mGetPurchaseUpdatesCallback = callbackContext;
-                PurchasingService.getPurchaseUpdates(false);
+                // Amazon IAP SDK requires calls on the main thread.
+                cordova.getActivity().runOnUiThread(() ->
+                        PurchasingService.getPurchaseUpdates(false));
                 return true;
 
             default:
@@ -339,6 +350,16 @@ public final class AmazonPurchasePlugin
                     cb.success();
                     mPurchaseCallback = null;
                 }
+                // Safety-net: schedule a delayed getPurchaseUpdates to re-deliver
+                // the purchase in case the listener message above was not processed
+                // (e.g. the WebView was still resuming from the purchase overlay).
+                mHandler.postDelayed(() -> {
+                    if (mInitialized) {
+                        Log.d(TAG, "post-purchase safety-net — getPurchaseUpdates(false)");
+                        flushPendingPurchases();
+                        PurchasingService.getPurchaseUpdates(false);
+                    }
+                }, RESUME_DELAY_MS);
                 break;
             case FAILED:
                 if (cb != null) {

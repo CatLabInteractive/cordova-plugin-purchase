@@ -40,11 +40,13 @@ SOFTWARE.
 	<license>MIT</license>
     <keywords>cordova,phonegap,purchase,purchases,storekit,billing,ios,android,play,appstore,amazon,windows,osx,macos</keywords>
 
-    <!-- Copy AppstoreAuthenticationKey.pem from project root to Android assets
-      if the file exists. Required by the Amazon Appstore SDK for DRM verification. -->
-    <hook type="after_prepare" src="scripts/copy-amazon-auth-key.js" />
-    <hook type="before_compile" src="scripts/copy-amazon-auth-key.js" />
-    <hook type="before_build" src="scripts/copy-amazon-auth-key.js" />
+    <!-- The Amazon Appstore natives (SDK, AmazonPurchasePlugin.java, the
+      AmazonInAppPurchasePlugin feature, the ResponseReceiver and the
+      AppstoreAuthenticationKey.pem hook) are not part of this plugin: an app
+      built for the Amazon Appstore installs them as a separate add-on
+      plugin, so a Google Play build does not carry the Amazon SDK. The
+      Amazon adapter in www/store.js calls that add-on's
+      "AmazonInAppPurchasePlugin" service. -->
 
     <!-- ios -->
     <platform name="ios">
@@ -141,33 +143,9 @@ SOFTWARE.
         https://developer.android.com/google/play/billing/billing_library_releases_notes
         NOTE: Billing Library 8.1.0+ requires minSdkVersion 23 or higher -->
       <framework src="com.android.billingclient:billing:8.3.0" />
-      <framework src="com.amazon.device:amazon-appstore-sdk:3.0.8" />
       <source-file src="src/android/cc/fovea/PurchasePlugin.java" target-dir="src/cc/fovea" />
       <source-file src="src/android/cc/fovea/Constants.java" target-dir="src/cc/fovea" />
-      <source-file src="src/android/cc/fovea/AmazonPurchasePlugin.java" target-dir="src/cc/fovea" />
 
-      <!-- Amazon IAP configuration -->
-      <config-file target="res/xml/config.xml" parent="/*">
-        <feature name="AmazonInAppPurchasePlugin">
-          <param
-            name="android-package"
-            value="cc.fovea.AmazonPurchasePlugin"
-            />
-        </feature>
-      </config-file>
-
-      <!-- Amazon IAP ResponseReceiver: required by the Amazon Appstore SDK to
-        deliver purchase response broadcasts back to the app. Without this,
-        the app never receives purchase completion notifications. -->
-      <config-file target="AndroidManifest.xml" parent="/manifest/application">
-        <receiver android:name="com.amazon.device.iap.ResponseReceiver"
-                  android:exported="true"
-                  android:permission="com.amazon.inapp.purchasing.Permission.NOTIFY">
-          <intent-filter>
-            <action android:name="com.amazon.inapp.purchasing.NOTIFY" />
-          </intent-filter>
-        </receiver>
-      </config-file>
     </platform>
 
     <platform name="browser">

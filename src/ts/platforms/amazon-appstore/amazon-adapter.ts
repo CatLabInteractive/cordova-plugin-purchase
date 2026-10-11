@@ -142,10 +142,15 @@ namespace CdvPurchase {
                     const iabError = (err: string) => {
                         this.initialized = false;
                         this.context.error(amazonError(ErrorCode.SETUP, "Init failed - " + err, null));
-                        this.retry.retry(() => this.initialize());
+                        // Not initialize(): that returns this same promise, so
+                        // the retry would be a no-op and a failed init would
+                        // never be retried. Run the native init again; the
+                        // promise above settles when it succeeds.
+                        this.retry.retry(go);
                     }
 
-                    this.bridge.init(iabReady, iabError, options);
+                    const go = () => this.bridge.init(iabReady, iabError, options);
+                    go();
                 });
             }
 
